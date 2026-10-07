@@ -8,140 +8,261 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-$error = '';
+header('Content-Type: text/html; charset=utf-8');
+
+$message = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $username = trim($_POST['username'] ?? '');
     $password = $_POST['password'] ?? '';
 
-    if ($username === '' || $password === '') {
+    $message .= '<p>1. POST received</p>';
 
-        $error = 'Please enter your Gmail and password.';
+    try {
 
-    } else {
+        $pdo = $conn->pdo();
 
-        try {
+        $message .= '<p>2. Database connected</p>';
 
-            $pdo = $conn->pdo();
+        /*
+         * Find user.
+         */
+        $stmt = $pdo->prepare(
+            'SELECT id, firstname, lastname, username, password
+             FROM users
+             WHERE username = :username
+             LIMIT 1'
+        );
+
+        $stmt->execute([
+            ':username' => $username
+        ]);
+
+        $user = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        $message .= '<p>3. User query completed</p>';
+
+        if (!$user) {
+
+            $message .= '
+                <p style="color:#ff6b6b;">
+                    4. USER NOT FOUND
+                </p>
+            ';
+
+        } elseif (!password_verify($password, $user['password'])) {
+
+            $message .= '
+                <p style="color:#ff6b6b;">
+                    4. PASSWORD DOES NOT MATCH
+                </p>
+            ';
+
+        } else {
+
+            $message .= '
+                <p style="color:#7CFC98;">
+                    4. USER AND PASSWORD ARE CORRECT
+                </p>
+            ';
 
             /*
-             * Find the user.
+             * Generate session ID.
              */
-            $stmt = $pdo->prepare(
-                'SELECT id, firstname, lastname, username, password
-                 FROM users
-                 WHERE username = :username
-                 LIMIT 1'
+            $sessionId = bin2hex(random_bytes(32));
+
+            $message .= '
+                <p>5. Session ID generated</p>
+            ';
+
+            /*
+             * Delete old sessions.
+             */
+            $deleteStmt = $pdo->prepare(
+                'DELETE FROM phodio_sessions
+                 WHERE client_id = :client_id'
             );
 
-            $stmt->execute([
-                ':username' => $username
+            $deleteStmt->execute([
+                ':client_id' => (int) $user['id']
             ]);
 
-            $user = $stmt->fetch(PDO::FETCH_ASSOC);
+            $message .= '
+                <p>6. Old sessions deleted</p>
+            ';
 
-            if (!$user) {
+            /*
+             * Insert new database session.
+             */
+            $sessionStmt = $pdo->prepare(
+                'INSERT INTO phodio_sessions
+                (
+                    session_id,
+                    client_id,
+                    client_username,
+                    client_name,
+                    created_at,
+                    expires_at
+                )
+                VALUES
+                (
+                    :session_id,
+                    :client_id,
+                    :client_username,
+                    :client_name,
+                    NOW(),
+                    NOW() + INTERVAL \'7 days\'
+                )'
+            );
 
-                $error = 'User not found.';
+            $sessionStmt->execute([
+                ':session_id' => $sessionId,
+                ':client_id' => (int) $user['id'],
+                ':client_username' => $user['username'],
+                ':client_name' =>
+                    $user['firstname'] . ' ' . $user['lastname']
+            ]);
 
-            } elseif (!password_verify($password, $user['password'])) {
+            $message .= '
+                <p style="color:#7CFC98;">
+                    7. DATABASE SESSION CREATED
+                </p>
+            ';
 
-                $error = 'Invalid password.';
+            /*
+             * Set browser cookie.
+             */
+            $cookieResult = setcookie(
+                'phodio_session',
+                $sessionId,
+                [
+                    'expires' => time() + (7 * 24 * 60 * 60),
+                    'path' => '/',
+                    'secure' => true,
+                    'httponly' => true,
+                    'samesite' => 'Lax'
+                ]
+            );
+
+            if ($cookieResult) {
+
+                $message .= '
+                    <p style="color:#7CFC98;">
+                        8. COOKIE CREATED
+                    </p>
+                ';
 
             } else {
 
-                /*
-                 * Generate a secure random session ID.
-                 */
-                $sessionId = bin2hex(random_bytes(32));
-
-                /*
-                 * Remove old sessions for this user.
-                 */
-                $deleteStmt = $pdo->prepare(
-                    'DELETE FROM phodio_sessions
-                     WHERE client_id = :client_id'
-                );
-
-                $deleteStmt->execute([
-                    ':client_id' => (int) $user['id']
-                ]);
-
-                /*
-                 * Store the new session in Supabase/PostgreSQL.
-                 */
-                $sessionStmt = $pdo->prepare(
-                    'INSERT INTO phodio_sessions
-                    (
-                        session_id,
-                        client_id,
-                        client_username,
-                        client_name,
-                        created_at,
-                        expires_at
-                    )
-                    VALUES
-                    (
-                        :session_id,
-                        :client_id,
-                        :client_username,
-                        :client_name,
-                        NOW(),
-                        NOW() + INTERVAL \'7 days\'
-                    )'
-                );
-
-                $sessionStmt->execute([
-                    ':session_id' => $sessionId,
-                    ':client_id' => (int) $user['id'],
-                    ':client_username' => $user['username'],
-                    ':client_name' =>
-                        $user['firstname'] . ' ' . $user['lastname']
-                ]);
-
-                /*
-                 * Store ONLY the random session ID in the browser.
-                 */
-                setcookie(
-                    'phodio_session',
-                    $sessionId,
-                    [
-                        'expires' => time() + (7 * 24 * 60 * 60),
-                        'path' => '/',
-                        'secure' => !empty($_SERVER['HTTPS'])
-                            && $_SERVER['HTTPS'] !== 'off',
-                        'httponly' => true,
-                        'samesite' => 'Lax'
-                    ]
-                );
-
-                /*
-                 * Keep the normal PHP session variables too.
-                 * This preserves compatibility with existing pages.
-                 */
-                $_SESSION['client_id'] = (int) $user['id'];
-                $_SESSION['client'] = $user['username'];
-                $_SESSION['client_name'] =
-                    $user['firstname'] . ' ' . $user['lastname'];
-
-                session_write_close();
-
-                /*
-                 * Go to the real client dashboard.
-                 */
-                header('Location: /client_dashboard.php');
-                exit;
+                $message .= '
+                    <p style="color:#ff6b6b;">
+                        8. COOKIE FAILED
+                    </p>
+                ';
             }
 
-        } catch (Throwable $e) {
+            /*
+             * Also create normal PHP session variables.
+             */
+            $_SESSION['client_id'] = (int) $user['id'];
+            $_SESSION['client'] = $user['username'];
+            $_SESSION['client_name'] =
+                $user['firstname'] . ' ' . $user['lastname'];
 
-            $error = 'Login error: ' . $e->getMessage();
+            session_write_close();
+
+            $message .= '
+                <p style="color:#7CFC98;">
+                    9. PHP SESSION SAVED
+                </p>
+            ';
+
+            $message .= '
+                <div style="
+                    margin-top:20px;
+                    padding:20px;
+                    background:#12351f;
+                    border:1px solid #246b3a;
+                    border-radius:10px;
+                ">
+                    <h2 style="color:#7CFC98;">
+                        DATABASE LOGIN SUCCESSFUL
+                    </h2>
+
+                    <p>
+                        User ID:
+                        ' .
+                        htmlspecialchars(
+                            (string)$user['id'],
+                            ENT_QUOTES,
+                            'UTF-8'
+                        ) .
+                    '
+                    </p>
+
+                    <p>
+                        Name:
+                        ' .
+                        htmlspecialchars(
+                            $user['firstname'] .
+                            ' ' .
+                            $user['lastname'],
+                            ENT_QUOTES,
+                            'UTF-8'
+                        ) .
+                    '
+                    </p>
+
+                    <p>
+                        The database session was created successfully.
+                    </p>
+
+                    <a
+                        href="/client_dashboard.php"
+                        style="
+                            display:inline-block;
+                            margin-top:10px;
+                            padding:12px 18px;
+                            background:#ef4444;
+                            color:white;
+                            text-decoration:none;
+                            border-radius:7px;
+                            font-weight:bold;
+                        "
+                    >
+                        OPEN CLIENT DASHBOARD
+                    </a>
+                </div>
+            ';
         }
+
+    } catch (Throwable $e) {
+
+        $message .= '
+            <div style="
+                margin-top:20px;
+                padding:15px;
+                background:#351212;
+                border:1px solid #6b2424;
+                border-radius:8px;
+                color:#ff8a8a;
+            ">
+                <strong>ERROR:</strong><br>
+                ' .
+                htmlspecialchars(
+                    $e->getMessage(),
+                    ENT_QUOTES,
+                    'UTF-8'
+                ) .
+            '
+            </div>
+        ';
     }
 }
 
 ?>
+
 <!DOCTYPE html>
 <html lang="en">
 
@@ -154,7 +275,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         content="width=device-width, initial-scale=1.0"
     >
 
-    <title>Client Login | SOULPRINT</title>
+    <title>Phodio Login Diagnostic</title>
 
     <style>
 
@@ -164,108 +285,69 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         body {
             margin: 0;
+            padding: 20px;
+
             min-height: 100vh;
+
             display: flex;
             align-items: center;
             justify-content: center;
-            padding: 20px;
 
-            background: #0b0d12;
-            color: #f8fafc;
+            background: #111;
+            color: white;
 
-            font-family:
-                Inter,
-                system-ui,
-                -apple-system,
-                BlinkMacSystemFont,
-                "Segoe UI",
-                sans-serif;
+            font-family: Arial, sans-serif;
         }
 
-        .login-card {
+        .card {
             width: 100%;
-            max-width: 420px;
+            max-width: 500px;
 
-            padding: 32px;
+            padding: 30px;
 
-            background: #151922;
-            border: 1px solid #2b3242;
-            border-radius: 18px;
+            background: #1d1d1d;
 
-            box-shadow:
-                0 20px 50px rgba(0, 0, 0, .35);
-        }
-
-        h1 {
-            margin: 0 0 8px;
-
-            font-size: 28px;
-        }
-
-        .subtitle {
-            margin-bottom: 28px;
-
-            color: #a6afbf;
-        }
-
-        label {
-            display: block;
-
-            margin-bottom: 7px;
-
-            font-size: 14px;
-            font-weight: 700;
+            border-radius: 15px;
         }
 
         input {
             width: 100%;
 
-            padding: 13px 14px;
-            margin-bottom: 18px;
+            padding: 12px;
+            margin: 8px 0 15px;
 
-            background: #0f1219;
+            background: #292929;
             color: white;
 
-            border: 1px solid #353d4e;
-            border-radius: 8px;
-
-            outline: none;
-        }
-
-        input:focus {
-            border-color: #ef4444;
+            border: 1px solid #444;
+            border-radius: 6px;
         }
 
         button {
             width: 100%;
 
-            padding: 13px;
+            padding: 12px;
 
-            border: 0;
-            border-radius: 8px;
-
-            background: #ef4444;
+            background: #3b82f6;
             color: white;
 
-            font-size: 15px;
-            font-weight: 700;
+            border: 0;
+            border-radius: 6px;
+
+            font-weight: bold;
 
             cursor: pointer;
         }
 
-        button:hover {
-            background: #d93636;
-        }
-
-        .error {
+        .result {
             margin-bottom: 20px;
-            padding: 12px 14px;
+            padding: 15px;
 
-            background: rgba(239, 68, 68, .12);
-            border: 1px solid rgba(239, 68, 68, .35);
+            background: #222;
+
             border-radius: 8px;
 
-            color: #fca5a5;
+            line-height: 1.5;
         }
 
     </style>
@@ -274,54 +356,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 <body>
 
-<div class="login-card">
+<div class="card">
 
-    <h1>Client Login</h1>
+    <h2>Client Login Diagnostic</h2>
 
-    <div class="subtitle">
-        Sign in to access your SOULPRINT client portal.
-    </div>
+    <?php if ($message !== ''): ?>
 
-    <?php if ($error !== ''): ?>
-
-        <div class="error">
-            <?= htmlspecialchars(
-                $error,
-                ENT_QUOTES,
-                'UTF-8'
-            ) ?>
+        <div class="result">
+            <?= $message ?>
         </div>
 
     <?php endif; ?>
 
     <form method="POST" action="/client_login.php">
 
-        <label for="username">
+        <label>
             Gmail
         </label>
 
         <input
-            id="username"
             type="email"
             name="username"
-            autocomplete="username"
             required
         >
 
-        <label for="password">
+        <label>
             Password
         </label>
 
         <input
-            id="password"
             type="password"
             name="password"
-            autocomplete="current-password"
             required
         >
 
         <button type="submit">
-            Login
+            TEST LOGIN
         </button>
 
     </form>
