@@ -1,43 +1,13 @@
 ```php
 <?php
 
-/*
-|--------------------------------------------------------------------------
-| ERROR DISPLAY
-|--------------------------------------------------------------------------
-| Temporary debugging for Vercel.
-| This lets us see the actual PHP error instead of a blank page.
-*/
-
+error_reporting(E_ALL);
 ini_set('display_errors', '1');
 ini_set('display_startup_errors', '1');
-error_reporting(E_ALL);
-
-header('Content-Type: text/html; charset=utf-8');
 
 date_default_timezone_set('Asia/Manila');
 
-
-/*
-|--------------------------------------------------------------------------
-| DATABASE
-|--------------------------------------------------------------------------
-*/
-
 require_once __DIR__ . '/config/database.php';
-
-
-/*
-|--------------------------------------------------------------------------
-| BOOKING HELPERS
-|--------------------------------------------------------------------------
-*/
-
-$bookingHelpers = __DIR__ . '/includes/booking_helpers.php';
-
-if (file_exists($bookingHelpers)) {
-    require_once $bookingHelpers;
-}
 
 
 /*
@@ -59,7 +29,7 @@ if (session_status() === PHP_SESSION_NONE) {
 
 /*
 |--------------------------------------------------------------------------
-| DATABASE CONNECTION
+| DATABASE
 |--------------------------------------------------------------------------
 */
 
@@ -70,22 +40,15 @@ try {
     http_response_code(500);
 
     echo '<h1>Database Connection Error</h1>';
-    echo '<pre>';
-    echo htmlspecialchars($e->getMessage());
-    echo '</pre>';
+    echo '<pre>' . htmlspecialchars($e->getMessage()) . '</pre>';
     exit;
 }
 
 
 /*
 |--------------------------------------------------------------------------
-| CHECK LOGIN SESSION
+| GET CURRENT CLIENT FROM PHP SESSION
 |--------------------------------------------------------------------------
-|
-| Vercel PHP instances do not reliably preserve normal PHP file sessions.
-| Therefore we also check the phodio_session cookie and the
-| phodio_sessions database table.
-|
 */
 
 $clientId = $_SESSION['client_id'] ?? null;
@@ -95,13 +58,11 @@ $clientName = $_SESSION['client_name'] ?? null;
 
 /*
 |--------------------------------------------------------------------------
-| RESTORE SESSION FROM DATABASE COOKIE
+| RESTORE CLIENT FROM DATABASE SESSION COOKIE
 |--------------------------------------------------------------------------
 */
 
 if (!$clientId && !empty($_COOKIE['phodio_session'])) {
-
-    $sessionToken = $_COOKIE['phodio_session'];
 
     try {
 
@@ -117,16 +78,16 @@ if (!$clientId && !empty($_COOKIE['phodio_session'])) {
         ");
 
         $stmt->execute([
-            ':session_id' => $sessionToken
+            ':session_id' => $_COOKIE['phodio_session']
         ]);
 
-        $sessionUser = $stmt->fetch(PDO::FETCH_ASSOC);
+        $savedSession = $stmt->fetch(PDO::FETCH_ASSOC);
 
-        if ($sessionUser) {
+        if ($savedSession) {
 
-            $clientId = (int) $sessionUser['client_id'];
-            $clientUsername = $sessionUser['client_username'];
-            $clientName = $sessionUser['client_name'];
+            $clientId = (int) $savedSession['client_id'];
+            $clientUsername = $savedSession['client_username'];
+            $clientName = $savedSession['client_name'];
 
             $_SESSION['client_id'] = $clientId;
             $_SESSION['client'] = $clientUsername;
@@ -137,10 +98,8 @@ if (!$clientId && !empty($_COOKIE['phodio_session'])) {
 
         http_response_code(500);
 
-        echo '<h1>Session Database Error</h1>';
-        echo '<pre>';
-        echo htmlspecialchars($e->getMessage());
-        echo '</pre>';
+        echo '<h1>Session Error</h1>';
+        echo '<pre>' . htmlspecialchars($e->getMessage()) . '</pre>';
         exit;
     }
 }
@@ -153,7 +112,6 @@ if (!$clientId && !empty($_COOKIE['phodio_session'])) {
 */
 
 if (!$clientId) {
-
     header('Location: /client_login.php');
     exit;
 }
@@ -161,15 +119,21 @@ if (!$clientId) {
 
 /*
 |--------------------------------------------------------------------------
-| CLIENT INFORMATION
+| GET USER
 |--------------------------------------------------------------------------
 */
 
 try {
 
     $stmt = $pdo->prepare("
-        SELECT *
-        FROM profiles
+        SELECT
+            id,
+            firstname,
+            lastname,
+            username,
+            phone,
+            profile_image
+        FROM users
         WHERE id = :client_id
         LIMIT 1
     ");
@@ -184,10 +148,8 @@ try {
 
     http_response_code(500);
 
-    echo '<h1>Client Query Error</h1>';
-    echo '<pre>';
-    echo htmlspecialchars($e->getMessage());
-    echo '</pre>';
+    echo '<h1>User Query Error</h1>';
+    echo '<pre>' . htmlspecialchars($e->getMessage()) . '</pre>';
     exit;
 }
 
@@ -196,8 +158,8 @@ if (!$client) {
 
     http_response_code(404);
 
-    echo '<h1>Client Not Found</h1>';
-    echo '<p>The logged-in client profile could not be found.</p>';
+    echo '<h1>User Not Found</h1>';
+    echo '<p>The logged-in user could not be found.</p>';
 
     exit;
 }
@@ -205,24 +167,23 @@ if (!$client) {
 
 /*
 |--------------------------------------------------------------------------
-| CLIENT DISPLAY NAME
+| CLIENT NAME
 |--------------------------------------------------------------------------
 */
 
-$displayName = $clientName;
+$firstName = $client['firstname'] ?? '';
+$lastName = $client['lastname'] ?? '';
 
-if (!$displayName) {
-    $displayName =
-        $client['full_name']
-        ?? $client['name']
-        ?? $client['username']
-        ?? 'Client';
+$fullName = trim($firstName . ' ' . $lastName);
+
+if ($fullName === '') {
+    $fullName = $clientName ?: $clientUsername ?: 'Client';
 }
 
 
 /*
 |--------------------------------------------------------------------------
-| BOOKING SUMMARY
+| BOOKING COUNTS
 |--------------------------------------------------------------------------
 */
 
@@ -237,63 +198,52 @@ try {
         SELECT
             COUNT(*) AS total_bookings,
             COUNT(*) FILTER (
-                WHERE LOWER(status) = 'pending'
+                WHERE LOWER(COALESCE(status, '')) = 'pending'
             ) AS pending_bookings,
             COUNT(*) FILTER (
-                WHERE LOWER(status) IN ('approved', 'confirmed')
+                WHERE LOWER(COALESCE(status, '')) IN (
+                    'approved',
+                    'confirmed'
+                )
             ) AS approved_bookings,
             COUNT(*) FILTER (
-                WHERE LOWER(status) IN ('completed', 'done')
+                WHERE LOWER(COALESCE(status, '')) IN (
+                    'completed',
+                    'complete',
+                    'done'
+                )
             ) AS completed_bookings
-        FROM reservations
-        WHERE tenant_id = :client_id
+        FROM bookings
+        WHERE client_id = :client_id
     ");
 
     $stmt->execute([
         ':client_id' => $clientId
     ]);
 
-    $summary = $stmt->fetch(PDO::FETCH_ASSOC);
+    $counts = $stmt->fetch(PDO::FETCH_ASSOC);
 
-    if ($summary) {
-        $totalBookings = (int) ($summary['total_bookings'] ?? 0);
-        $pendingBookings = (int) ($summary['pending_bookings'] ?? 0);
-        $approvedBookings = (int) ($summary['approved_bookings'] ?? 0);
-        $completedBookings = (int) ($summary['completed_bookings'] ?? 0);
+    if ($counts) {
+        $totalBookings = (int) ($counts['total_bookings'] ?? 0);
+        $pendingBookings = (int) ($counts['pending_bookings'] ?? 0);
+        $approvedBookings = (int) ($counts['approved_bookings'] ?? 0);
+        $completedBookings = (int) ($counts['completed_bookings'] ?? 0);
     }
 
 } catch (Throwable $e) {
 
     /*
-     * Do not immediately kill the dashboard if the reservation
-     * structure is slightly different.
-     *
-     * Display the error while debugging.
+     * If the booking status values are different, keep the dashboard
+     * running and show the error temporarily.
      */
 
-    echo '<div style="
-        margin:20px;
-        padding:15px;
-        background:#ffe5e5;
-        border:1px solid #ff7777;
-        color:#990000;
-        font-family:Arial,sans-serif;
-        border-radius:8px;
-    ">';
-
-    echo '<strong>Booking Summary Error:</strong><br>';
-
-    echo '<pre style="white-space:pre-wrap;">';
-    echo htmlspecialchars($e->getMessage());
-    echo '</pre>';
-
-    echo '</div>';
+    $bookingCountError = $e->getMessage();
 }
 
 
 /*
 |--------------------------------------------------------------------------
-| RECENT BOOKINGS
+| GET RECENT BOOKINGS
 |--------------------------------------------------------------------------
 */
 
@@ -303,16 +253,20 @@ try {
 
     $stmt = $pdo->prepare("
         SELECT
-            r.*,
-            d.name AS dormitory_name,
-            rm.room_number
-        FROM reservations r
-        LEFT JOIN dormitories d
-            ON d.id = r.dormitory_id
-        LEFT JOIN rooms rm
-            ON rm.id = r.room_id
-        WHERE r.tenant_id = :client_id
-        ORDER BY r.created_at DESC
+            id,
+            title,
+            service_type,
+            package_type,
+            motif,
+            price,
+            booking_date,
+            start_time,
+            status,
+            status_note,
+            created_at
+        FROM bookings
+        WHERE client_id = :client_id
+        ORDER BY created_at DESC
         LIMIT 10
     ");
 
@@ -324,29 +278,17 @@ try {
 
 } catch (Throwable $e) {
 
-    echo '<div style="
-        margin:20px;
-        padding:15px;
-        background:#ffe5e5;
-        border:1px solid #ff7777;
-        color:#990000;
-        font-family:Arial,sans-serif;
-        border-radius:8px;
-    ">';
+    http_response_code(500);
 
-    echo '<strong>Bookings Query Error:</strong><br>';
-
-    echo '<pre style="white-space:pre-wrap;">';
-    echo htmlspecialchars($e->getMessage());
-    echo '</pre>';
-
-    echo '</div>';
+    echo '<h1>Bookings Query Error</h1>';
+    echo '<pre>' . htmlspecialchars($e->getMessage()) . '</pre>';
+    exit;
 }
 
 
 /*
 |--------------------------------------------------------------------------
-| SAFE HTML HELPER
+| HTML ESCAPE
 |--------------------------------------------------------------------------
 */
 
@@ -382,7 +324,10 @@ function h($value): string
 
         body {
             margin: 0;
-            font-family: Arial, Helvetica, sans-serif;
+            font-family:
+                Arial,
+                Helvetica,
+                sans-serif;
             background: #f5f7fb;
             color: #222;
         }
@@ -391,19 +336,29 @@ function h($value): string
             background: #1565c0;
             color: white;
             padding: 16px 30px;
+
             display: flex;
-            justify-content: space-between;
             align-items: center;
+            justify-content: space-between;
         }
 
         .navbar h2 {
             margin: 0;
         }
 
+        .navbar-right {
+            display: flex;
+            align-items: center;
+            gap: 18px;
+        }
+
         .navbar a {
             color: white;
             text-decoration: none;
-            margin-left: 18px;
+        }
+
+        .navbar a:hover {
+            text-decoration: underline;
         }
 
         .container {
@@ -417,15 +372,22 @@ function h($value): string
         }
 
         .welcome h1 {
-            margin-bottom: 5px;
+            margin: 0 0 8px;
+        }
+
+        .welcome p {
+            margin: 0;
+            color: #666;
         }
 
         .cards {
             display: grid;
-            grid-template-columns: repeat(
-                auto-fit,
-                minmax(200px, 1fr)
-            );
+            grid-template-columns:
+                repeat(
+                    auto-fit,
+                    minmax(200px, 1fr)
+                );
+
             gap: 20px;
             margin-bottom: 30px;
         }
@@ -434,14 +396,17 @@ function h($value): string
             background: white;
             padding: 25px;
             border-radius: 12px;
+
             box-shadow:
-                0 3px 10px rgba(0,0,0,0.08);
+                0 3px 12px
+                rgba(0, 0, 0, 0.08);
         }
 
         .card h3 {
-            margin-top: 0;
+            margin: 0 0 10px;
             color: #666;
             font-size: 15px;
+            font-weight: normal;
         }
 
         .number {
@@ -455,12 +420,18 @@ function h($value): string
             border-radius: 12px;
             padding: 25px;
             margin-bottom: 25px;
+
             box-shadow:
-                0 3px 10px rgba(0,0,0,0.08);
+                0 3px 12px
+                rgba(0, 0, 0, 0.08);
         }
 
         .section h2 {
             margin-top: 0;
+        }
+
+        .table-wrapper {
+            overflow-x: auto;
         }
 
         table {
@@ -470,13 +441,19 @@ function h($value): string
 
         th,
         td {
-            padding: 12px;
+            padding: 13px;
             border-bottom: 1px solid #eee;
             text-align: left;
+            white-space: nowrap;
         }
 
         th {
             background: #f5f7fb;
+            font-size: 14px;
+        }
+
+        td {
+            font-size: 14px;
         }
 
         .status {
@@ -484,7 +461,7 @@ function h($value): string
             padding: 5px 10px;
             border-radius: 20px;
             background: #eee;
-            font-size: 13px;
+            font-size: 12px;
         }
 
         .empty {
@@ -498,8 +475,47 @@ function h($value): string
             background: #1565c0;
             color: white;
             text-decoration: none;
+
             padding: 10px 16px;
             border-radius: 7px;
+        }
+
+        .button:hover {
+            background: #0d47a1;
+        }
+
+        .profile {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .profile-image {
+            width: 42px;
+            height: 42px;
+            border-radius: 50%;
+            object-fit: cover;
+            background: #ddd;
+        }
+
+        .profile-info {
+            margin-bottom: 25px;
+        }
+
+        .profile-info p {
+            margin: 6px 0;
+            color: #555;
+        }
+
+        .error-box {
+            margin-bottom: 20px;
+            padding: 15px;
+
+            background: #fff3cd;
+            border: 1px solid #ffe69c;
+            color: #664d03;
+
+            border-radius: 8px;
         }
 
         @media (max-width: 700px) {
@@ -508,17 +524,17 @@ function h($value): string
                 padding: 15px;
             }
 
+            .navbar-right {
+                gap: 10px;
+                font-size: 13px;
+            }
+
             .container {
                 padding: 0 12px;
             }
 
-            table {
-                font-size: 13px;
-            }
-
-            th,
-            td {
-                padding: 8px;
+            .section {
+                padding: 18px;
             }
 
         }
@@ -527,17 +543,20 @@ function h($value): string
 
 </head>
 
+
 <body>
 
 
 <nav class="navbar">
 
-    <h2>Phodio</h2>
+    <h2>
+        Phodio
+    </h2>
 
-    <div>
+    <div class="navbar-right">
 
         <span>
-            Welcome, <?= h($displayName) ?>
+            <?= h($fullName) ?>
         </span>
 
         <a href="/client_booking.php">
@@ -559,15 +578,31 @@ function h($value): string
     <div class="welcome">
 
         <h1>
-            Client Dashboard
+            Welcome back, <?= h($firstName ?: $fullName) ?>!
         </h1>
 
         <p>
-            Welcome back,
-            <strong><?= h($displayName) ?></strong>.
+            Here's an overview of your Phodio bookings.
         </p>
 
     </div>
+
+
+    <?php if (!empty($bookingCountError)): ?>
+
+        <div class="error-box">
+
+            <strong>
+                Booking count warning:
+            </strong>
+
+            <br>
+
+            <?= h($bookingCountError) ?>
+
+        </div>
+
+    <?php endif; ?>
 
 
     <div class="cards">
@@ -631,6 +666,34 @@ function h($value): string
     <div class="section">
 
         <h2>
+            My Information
+        </h2>
+
+        <div class="profile-info">
+
+            <p>
+                <strong>Name:</strong>
+                <?= h($fullName) ?>
+            </p>
+
+            <p>
+                <strong>Username:</strong>
+                <?= h($client['username'] ?? '') ?>
+            </p>
+
+            <p>
+                <strong>Phone:</strong>
+                <?= h($client['phone'] ?? '') ?>
+            </p>
+
+        </div>
+
+    </div>
+
+
+    <div class="section">
+
+        <h2>
             Recent Bookings
         </h2>
 
@@ -655,7 +718,7 @@ function h($value): string
         <?php else: ?>
 
 
-            <div style="overflow-x:auto;">
+            <div class="table-wrapper">
 
                 <table>
 
@@ -664,19 +727,31 @@ function h($value): string
                         <tr>
 
                             <th>
-                                Dormitory
+                                Title
                             </th>
 
                             <th>
-                                Room
+                                Service
+                            </th>
+
+                            <th>
+                                Package
+                            </th>
+
+                            <th>
+                                Booking Date
+                            </th>
+
+                            <th>
+                                Time
+                            </th>
+
+                            <th>
+                                Price
                             </th>
 
                             <th>
                                 Status
-                            </th>
-
-                            <th>
-                                Created
                             </th>
 
                         </tr>
@@ -692,15 +767,40 @@ function h($value): string
 
                                 <td>
                                     <?= h(
-                                        $booking['dormitory_name']
-                                        ?? 'N/A'
+                                        $booking['title'] ?? 'N/A'
                                     ) ?>
                                 </td>
 
                                 <td>
                                     <?= h(
-                                        $booking['room_number']
-                                        ?? 'N/A'
+                                        $booking['service_type'] ?? 'N/A'
+                                    ) ?>
+                                </td>
+
+                                <td>
+                                    <?= h(
+                                        $booking['package_type'] ?? 'N/A'
+                                    ) ?>
+                                </td>
+
+                                <td>
+                                    <?= h(
+                                        $booking['booking_date'] ?? 'N/A'
+                                    ) ?>
+                                </td>
+
+                                <td>
+                                    <?= h(
+                                        $booking['start_time'] ?? 'N/A'
+                                    ) ?>
+                                </td>
+
+                                <td>
+                                    ₱<?= number_format(
+                                        (float) (
+                                            $booking['price'] ?? 0
+                                        ),
+                                        2
                                     ) ?>
                                 </td>
 
@@ -715,13 +815,6 @@ function h($value): string
 
                                     </span>
 
-                                </td>
-
-                                <td>
-                                    <?= h(
-                                        $booking['created_at']
-                                        ?? ''
-                                    ) ?>
                                 </td>
 
                             </tr>
