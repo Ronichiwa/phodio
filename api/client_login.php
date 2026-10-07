@@ -9,9 +9,9 @@ if (session_status() === PHP_SESSION_NONE) {
 $error = '';
 $debug = '';
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
-    $debug = 'LOGIN POST RECEIVED';
+    $debug = 'POST REQUEST RECEIVED';
 
     $username = trim($_POST['username'] ?? '');
     $password = $_POST['password'] ?? '';
@@ -24,16 +24,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
 
         try {
 
-            $debug = 'DATABASE CONNECTION OK';
-
             $pdo = $conn->pdo();
 
+            $debug = 'DATABASE CONNECTION SUCCESSFUL';
+
             $stmt = $pdo->prepare(
-                'SELECT
-                    id,
-                    firstname,
-                    lastname,
-                    password
+                'SELECT id, firstname, lastname, password
                  FROM users
                  WHERE username = :username
                  LIMIT 1'
@@ -48,21 +44,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
             if (!$user) {
 
                 $error = 'User not found.';
-                $debug = 'DATABASE QUERY WORKED - USER NOT FOUND';
+                $debug = 'USER NOT FOUND';
 
-            } elseif (
-                !password_verify(
-                    $password,
-                    $user['password']
-                )
-            ) {
+            } elseif (!password_verify($password, $user['password'])) {
 
                 $error = 'Invalid password.';
-                $debug = 'USER FOUND - PASSWORD DOES NOT MATCH';
+                $debug = 'USER FOUND BUT PASSWORD IS WRONG';
 
             } else {
-
-                $debug = 'LOGIN SUCCESSFUL - CREATING SESSION';
 
                 $_SESSION['client_id'] = $user['id'];
                 $_SESSION['client'] = $username;
@@ -254,11 +243,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
     <?php if ($debug !== ''): ?>
 
         <div class="debug-msg">
-
             <i class="ri-information-line me-2"></i>
-
             <?= htmlspecialchars($debug) ?>
-
         </div>
 
     <?php endif; ?>
@@ -266,16 +252,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
     <?php if ($error !== ''): ?>
 
         <div class="error-msg">
-
             <i class="ri-error-warning-line me-2"></i>
-
             <?= htmlspecialchars($error) ?>
-
         </div>
 
     <?php endif; ?>
 
-    <form method="POST" action="">
+    <form
+        method="POST"
+        action="/client_login.php"
+        autocomplete="on"
+    >
 
         <div class="mb-3 text-start">
 
@@ -290,7 +277,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
                 </span>
 
                 <input
-                    type="text"
+                    type="email"
                     name="username"
                     class="form-control"
                     placeholder="Enter Gmail"
