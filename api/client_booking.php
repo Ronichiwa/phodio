@@ -1,4 +1,3 @@
-```php
 <?php
 
 error_reporting(E_ALL);
@@ -15,15 +14,14 @@ require_once __DIR__ . '/includes/booking_helpers.php';
 |--------------------------------------------------------------------------
 | SESSION
 |--------------------------------------------------------------------------
+|
+| The database-backed phodio_session cookie is the reliable login
+| mechanism on Vercel. PHP file sessions may not survive between
+| serverless requests.
+|
 */
 
 if (session_status() === PHP_SESSION_NONE) {
-    ini_set('session.save_path', '/tmp/phodio-sessions');
-
-    if (!is_dir('/tmp/phodio-sessions')) {
-        @mkdir('/tmp/phodio-sessions', 0700, true);
-    }
-
     session_start();
 }
 
@@ -35,13 +33,23 @@ if (session_status() === PHP_SESSION_NONE) {
 */
 
 try {
-    $conn = new PhodioDbConnection();
+
     $pdo = $conn->pdo();
+
 } catch (Throwable $e) {
+
     http_response_code(500);
 
     echo '<h1>Database Connection Error</h1>';
-    echo '<pre>' . htmlspecialchars($e->getMessage()) . '</pre>';
+
+    echo '<pre>' .
+        htmlspecialchars(
+            $e->getMessage(),
+            ENT_QUOTES,
+            'UTF-8'
+        ) .
+    '</pre>';
+
     exit;
 }
 
@@ -52,9 +60,17 @@ try {
 |--------------------------------------------------------------------------
 */
 
-$clientId = $_SESSION['client_id'] ?? null;
-$clientUsername = $_SESSION['client'] ?? null;
-$clientName = $_SESSION['client_name'] ?? null;
+$clientId =
+    $_SESSION['client_id'] ?? null;
+
+$clientUsername =
+    $_SESSION['client'] ??
+    $_SESSION['client_username'] ??
+    null;
+
+$clientName =
+    $_SESSION['client_name'] ??
+    null;
 
 
 /*
@@ -62,14 +78,20 @@ $clientName = $_SESSION['client_name'] ?? null;
 | RESTORE CLIENT FROM DATABASE SESSION
 |--------------------------------------------------------------------------
 |
-| Vercel does not reliably preserve PHP file sessions between requests.
-| The phodio_session cookie points to the database-backed session.
+| If the PHP session disappeared between Vercel requests, use the
+| phodio_session cookie to restore the logged-in client.
 |
 */
 
-if (!$clientId && !empty($_COOKIE['phodio_session'])) {
+if (
+    empty($clientId) &&
+    !empty($_COOKIE['phodio_session'])
+) {
 
     try {
+
+        $sessionId =
+            (string) $_COOKIE['phodio_session'];
 
         $stmt = $pdo->prepare("
             SELECT
@@ -83,20 +105,37 @@ if (!$clientId && !empty($_COOKIE['phodio_session'])) {
         ");
 
         $stmt->execute([
-            ':session_id' => $_COOKIE['phodio_session']
+            'session_id' => $sessionId
         ]);
 
-        $savedSession = $stmt->fetch(PDO::FETCH_ASSOC);
+        $savedSession =
+            $stmt->fetch(PDO::FETCH_ASSOC);
 
         if ($savedSession) {
 
-            $clientId = (int) $savedSession['client_id'];
-            $clientUsername = $savedSession['client_username'];
-            $clientName = $savedSession['client_name'];
+            $clientId =
+                (int) $savedSession['client_id'];
 
-            $_SESSION['client_id'] = $clientId;
-            $_SESSION['client'] = $clientUsername;
-            $_SESSION['client_name'] = $clientName;
+            $clientUsername =
+                $savedSession['client_username'] ?? '';
+
+            $clientName =
+                $savedSession['client_name'] ?? '';
+
+            /*
+             * Restore the normal PHP session too.
+             */
+            $_SESSION['client_id'] =
+                $clientId;
+
+            $_SESSION['client'] =
+                $clientUsername;
+
+            $_SESSION['client_username'] =
+                $clientUsername;
+
+            $_SESSION['client_name'] =
+                $clientName;
         }
 
     } catch (Throwable $e) {
@@ -104,7 +143,15 @@ if (!$clientId && !empty($_COOKIE['phodio_session'])) {
         http_response_code(500);
 
         echo '<h1>Session Database Error</h1>';
-        echo '<pre>' . htmlspecialchars($e->getMessage()) . '</pre>';
+
+        echo '<pre>' .
+            htmlspecialchars(
+                $e->getMessage(),
+                ENT_QUOTES,
+                'UTF-8'
+            ) .
+        '</pre>';
+
         exit;
     }
 }
@@ -116,8 +163,12 @@ if (!$clientId && !empty($_COOKIE['phodio_session'])) {
 |--------------------------------------------------------------------------
 */
 
-if (!$clientId) {
-    header('Location: /client_login.php');
+if (empty($clientId)) {
+
+    header(
+        'Location: /client_login.php'
+    );
+
     exit;
 }
 
@@ -128,16 +179,22 @@ if (!$clientId) {
 |--------------------------------------------------------------------------
 */
 
-$packages = phodio_package_catalog();
+$packages =
+    phodio_package_catalog();
 
-$serviceTypes = phodio_service_types();
+$serviceTypes =
+    phodio_service_types();
 
-$today = date('Y-m-d');
+$today =
+    date('Y-m-d');
 
 $groupedPackages = [];
 
 foreach ($packages as $package) {
-    $groupedPackages[$package['category']][] = $package;
+
+    $groupedPackages[
+        $package['category']
+    ][] = $package;
 }
 
 
@@ -159,9 +216,15 @@ function phodio_h(string $value): string
 ?>
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
+
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
 
     <title>Book a Session | SOULPRINT</title>
 
@@ -181,61 +244,323 @@ function phodio_h(string $value): string
     >
 
     <style>
-        :root{--page:#0b0d12;--panel:#151922;--panel-soft:#1b2130;--line:#2b3242;--accent:#ef4444;--blue:#7da8ff;--muted:#a6afbf;}
-        body{background:var(--page);color:#f8fafc;font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;}
-        .client-main{max-width:1440px;margin:auto;padding:30px 22px 48px;}
-        .hero{background:radial-gradient(circle at 80% 10%,rgba(239,68,68,.2),transparent 40%),linear-gradient(135deg,#1b2130,#11151e);border:1px solid var(--line);border-radius:20px;padding:28px 30px;margin-bottom:24px;}
-        .hero h1{font-weight:800;letter-spacing:-.04em;}
-        .eyebrow{color:#ff9696;text-transform:uppercase;letter-spacing:.14em;font-size:.72rem;font-weight:800;}
-        .surface{background:var(--panel);border:1px solid var(--line);border-radius:16px;color:#f8fafc;}
-        .surface-header{border-bottom:1px solid var(--line);padding:17px 20px;font-weight:700;}
-        .surface-body{padding:20px;}
-        .form-control,.form-select{background:#0e121a;border:1px solid #394155;color:#f8fafc;}
-        .form-control:focus,.form-select:focus{background:#0e121a;color:#fff;border-color:#ff6868;box-shadow:0 0 0 .2rem rgba(239,68,68,.15);}
-        .form-control::placeholder{color:#7e899c;}
-        .form-label{font-size:.85rem;font-weight:650;color:#dce2ec;}
-        .btn-primary{background:var(--accent);border-color:var(--accent);font-weight:700;}
-        .btn-primary:hover{background:#d93636;border-color:#d93636;}
-        .text-secondary-custom{color:var(--muted)!important;}
-        .rec-card{height:100%;background:linear-gradient(145deg,#191e2b,#11151d);border:1px solid #30394d;border-radius:14px;padding:17px;}
-        .match-score{background:rgba(16,185,129,.14);color:#6ee7b7;border:1px solid rgba(16,185,129,.28);}
-        .rec-reason{color:#bdc7d7;font-size:.83rem;}
-        #calendar{min-height:620px;background:var(--panel);padding:12px;border-radius:0 0 16px 16px;}
-        .fc{--fc-border-color:#303849;--fc-page-bg-color:var(--panel);--fc-neutral-bg-color:#171d29;--fc-list-event-hover-bg-color:#20283a;}
-        .fc .fc-toolbar-title{font-size:1.15rem;font-weight:750;color:#fff;}
-        .fc .fc-button-primary{background:#242c3d;border-color:#3b465b;text-transform:capitalize;}
-        .fc .fc-button-primary:hover,.fc .fc-button-primary:focus{background:#343e52;border-color:#53617c;box-shadow:none;}
-        .fc .fc-button-primary:not(:disabled).fc-button-active{background:var(--accent);border-color:var(--accent);}
-        .fc .fc-daygrid-day-number,.fc .fc-col-header-cell-cushion{color:#e7ebf2;text-decoration:none;}
-        .fc .fc-day-today{background:rgba(239,68,68,.08)!important;}
-        .fc .fc-daygrid-day:hover{background:rgba(255,255,255,.035);cursor:pointer;}
-        .status-chip{display:inline-flex;align-items:center;border-radius:999px;padding:5px 10px;font-size:.76rem;font-weight:750;white-space:nowrap;}
-        .status-pending{background:rgba(245,158,11,.14);color:#fbbf24;}
-        .status-confirmed{background:rgba(59,130,246,.15);color:#93c5fd;}
-        .status-progress,.status-editing{background:rgba(168,85,247,.16);color:#d8b4fe;}
-        .status-ready{background:rgba(16,185,129,.16);color:#6ee7b7;}
-        .status-completed{background:rgba(34,197,94,.16);color:#86efac;}
-        .status-cancelled{background:rgba(148,163,184,.14);color:#cbd5e1;}
-        .timeline{border-left:1px solid #3b4559;margin-left:7px;padding-left:17px;}
-        .timeline-item{position:relative;padding-bottom:14px;}
-        .timeline-item:before{content:"";position:absolute;left:-22px;top:5px;width:9px;height:9px;border-radius:50%;background:#ef4444;box-shadow:0 0 0 4px rgba(239,68,68,.12);}
-        .soft-badge{background:#222b3b;color:#cbd5e1;border:1px solid #364156;}
-        .toast-container{z-index:2000;}
-        .booking-table td{padding:.45rem 0;vertical-align:top;}
-        .booking-table td:first-child{color:var(--muted);width:38%;}
-        @media(max-width:768px){.client-main{padding:18px 12px 30px}.hero{padding:22px}.fc .fc-toolbar{display:flex;flex-direction:column;gap:10px}.fc .fc-toolbar-chunk{display:flex;justify-content:center}}
+
+        :root{
+            --page:#0b0d12;
+            --panel:#151922;
+            --panel-soft:#1b2130;
+            --line:#2b3242;
+            --accent:#ef4444;
+            --blue:#7da8ff;
+            --muted:#a6afbf;
+        }
+
+        body{
+            background:var(--page);
+            color:#f8fafc;
+            font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;
+        }
+
+        .client-main{
+            max-width:1440px;
+            margin:auto;
+            padding:30px 22px 48px;
+        }
+
+        .hero{
+            background:
+                radial-gradient(
+                    circle at 80% 10%,
+                    rgba(239,68,68,.2),
+                    transparent 40%
+                ),
+                linear-gradient(
+                    135deg,
+                    #1b2130,
+                    #11151e
+                );
+
+            border:1px solid var(--line);
+            border-radius:20px;
+            padding:28px 30px;
+            margin-bottom:24px;
+        }
+
+        .hero h1{
+            font-weight:800;
+            letter-spacing:-.04em;
+        }
+
+        .eyebrow{
+            color:#ff9696;
+            text-transform:uppercase;
+            letter-spacing:.14em;
+            font-size:.72rem;
+            font-weight:800;
+        }
+
+        .surface{
+            background:var(--panel);
+            border:1px solid var(--line);
+            border-radius:16px;
+            color:#f8fafc;
+        }
+
+        .surface-header{
+            border-bottom:1px solid var(--line);
+            padding:17px 20px;
+            font-weight:700;
+        }
+
+        .surface-body{
+            padding:20px;
+        }
+
+        .form-control,
+        .form-select{
+            background:#0e121a;
+            border:1px solid #394155;
+            color:#f8fafc;
+        }
+
+        .form-control:focus,
+        .form-select:focus{
+            background:#0e121a;
+            color:#fff;
+            border-color:#ff6868;
+            box-shadow:
+                0 0 0 .2rem
+                rgba(239,68,68,.15);
+        }
+
+        .form-control::placeholder{
+            color:#7e899c;
+        }
+
+        .form-label{
+            font-size:.85rem;
+            font-weight:650;
+            color:#dce2ec;
+        }
+
+        .btn-primary{
+            background:var(--accent);
+            border-color:var(--accent);
+            font-weight:700;
+        }
+
+        .btn-primary:hover{
+            background:#d93636;
+            border-color:#d93636;
+        }
+
+        .text-secondary-custom{
+            color:var(--muted)!important;
+        }
+
+        .rec-card{
+            height:100%;
+            background:
+                linear-gradient(
+                    145deg,
+                    #191e2b,
+                    #11151d
+                );
+
+            border:1px solid #30394d;
+            border-radius:14px;
+            padding:17px;
+        }
+
+        .match-score{
+            background:rgba(16,185,129,.14);
+            color:#6ee7b7;
+            border:1px solid rgba(16,185,129,.28);
+        }
+
+        .rec-reason{
+            color:#bdc7d7;
+            font-size:.83rem;
+        }
+
+        #calendar{
+            min-height:620px;
+            background:var(--panel);
+            padding:12px;
+            border-radius:0 0 16px 16px;
+        }
+
+        .fc{
+            --fc-border-color:#303849;
+            --fc-page-bg-color:var(--panel);
+            --fc-neutral-bg-color:#171d29;
+            --fc-list-event-hover-bg-color:#20283a;
+        }
+
+        .fc .fc-toolbar-title{
+            font-size:1.15rem;
+            font-weight:750;
+            color:#fff;
+        }
+
+        .fc .fc-button-primary{
+            background:#242c3d;
+            border-color:#3b465b;
+            text-transform:capitalize;
+        }
+
+        .fc .fc-button-primary:hover,
+        .fc .fc-button-primary:focus{
+            background:#343e52;
+            border-color:#53617c;
+            box-shadow:none;
+        }
+
+        .fc .fc-button-primary:not(:disabled).fc-button-active{
+            background:var(--accent);
+            border-color:var(--accent);
+        }
+
+        .fc .fc-daygrid-day-number,
+        .fc .fc-col-header-cell-cushion{
+            color:#e7ebf2;
+            text-decoration:none;
+        }
+
+        .fc .fc-day-today{
+            background:rgba(239,68,68,.08)!important;
+        }
+
+        .fc .fc-daygrid-day:hover{
+            background:rgba(255,255,255,.035);
+            cursor:pointer;
+        }
+
+        .status-chip{
+            display:inline-flex;
+            align-items:center;
+            border-radius:999px;
+            padding:5px 10px;
+            font-size:.76rem;
+            font-weight:750;
+            white-space:nowrap;
+        }
+
+        .status-pending{
+            background:rgba(245,158,11,.14);
+            color:#fbbf24;
+        }
+
+        .status-confirmed{
+            background:rgba(59,130,246,.15);
+            color:#93c5fd;
+        }
+
+        .status-progress,
+        .status-editing{
+            background:rgba(168,85,247,.16);
+            color:#d8b4fe;
+        }
+
+        .status-ready{
+            background:rgba(16,185,129,.16);
+            color:#6ee7b7;
+        }
+
+        .status-completed{
+            background:rgba(34,197,94,.16);
+            color:#86efac;
+        }
+
+        .status-cancelled{
+            background:rgba(148,163,184,.14);
+            color:#cbd5e1;
+        }
+
+        .timeline{
+            border-left:1px solid #3b4559;
+            margin-left:7px;
+            padding-left:17px;
+        }
+
+        .timeline-item{
+            position:relative;
+            padding-bottom:14px;
+        }
+
+        .timeline-item:before{
+            content:"";
+            position:absolute;
+            left:-22px;
+            top:5px;
+            width:9px;
+            height:9px;
+            border-radius:50%;
+            background:#ef4444;
+            box-shadow:
+                0 0 0 4px
+                rgba(239,68,68,.12);
+        }
+
+        .soft-badge{
+            background:#222b3b;
+            color:#cbd5e1;
+            border:1px solid #364156;
+        }
+
+        .toast-container{
+            z-index:2000;
+        }
+
+        .booking-table td{
+            padding:.45rem 0;
+            vertical-align:top;
+        }
+
+        .booking-table td:first-child{
+            color:var(--muted);
+            width:38%;
+        }
+
+        @media(max-width:768px){
+
+            .client-main{
+                padding:18px 12px 30px;
+            }
+
+            .hero{
+                padding:22px;
+            }
+
+            .fc .fc-toolbar{
+                display:flex;
+                flex-direction:column;
+                gap:10px;
+            }
+
+            .fc .fc-toolbar-chunk{
+                display:flex;
+                justify-content:center;
+            }
+        }
+
     </style>
+
 </head>
 
 <body>
 
 <?php include __DIR__ . '/includes/client_header.php'; ?>
 
+
 <main class="client-main">
 
-    <section class="hero d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-center">
+    <section
+        class="hero d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-center"
+    >
 
         <div>
+
             <div class="eyebrow mb-2">
                 Soul Print · Client Portal
             </div>
@@ -248,7 +573,9 @@ function phodio_h(string $value): string
                 Explore package recommendations, request an appointment,
                 and follow your service progress in one place.
             </p>
+
         </div>
+
 
         <a
             class="btn btn-primary px-4 py-2"
@@ -278,6 +605,7 @@ function phodio_h(string $value): string
 
                 </div>
 
+
                 <div class="surface-body">
 
                     <p class="text-secondary-custom small mb-3">
@@ -286,6 +614,7 @@ function phodio_h(string $value): string
                         style, and backdrop preference to available
                         studio packages.
                     </p>
+
 
                     <form id="recommendationForm">
 
@@ -334,10 +663,23 @@ function phodio_h(string $value): string
                                     id="recPeople"
                                     name="people"
                                 >
-                                    <option value="1">1 person</option>
-                                    <option value="2">2 people</option>
-                                    <option value="3">3 people</option>
-                                    <option value="4">4 people</option>
+
+                                    <option value="1">
+                                        1 person
+                                    </option>
+
+                                    <option value="2">
+                                        2 people
+                                    </option>
+
+                                    <option value="3">
+                                        3 people
+                                    </option>
+
+                                    <option value="4">
+                                        4 people
+                                    </option>
+
                                 </select>
 
                             </div>
@@ -384,7 +726,10 @@ function phodio_h(string $value): string
                                 name="style"
                             >
 
-                                <?php foreach (phodio_style_preferences() as $key => $label): ?>
+                                <?php foreach (
+                                    phodio_style_preferences()
+                                    as $key => $label
+                                ): ?>
 
                                     <option value="<?= phodio_h($key) ?>">
                                         <?= phodio_h($label) ?>
@@ -403,6 +748,7 @@ function phodio_h(string $value): string
                                 class="form-label"
                                 for="recRequirements"
                             >
+
                                 Requirements or preferences
 
                                 <span class="text-secondary-custom fw-normal">
@@ -410,6 +756,7 @@ function phodio_h(string $value): string
                                 </span>
 
                             </label>
+
 
                             <textarea
                                 class="form-control"
@@ -448,11 +795,15 @@ function phodio_h(string $value): string
                             type="submit"
                             id="recommendButton"
                         >
+
                             <i class="ri-magic-line me-2"></i>
+
                             Recommend packages
+
                         </button>
 
                     </form>
+
 
                     <div class="small text-secondary-custom mt-3">
 
@@ -474,7 +825,9 @@ function phodio_h(string $value): string
 
             <div class="surface h-100">
 
-                <div class="surface-header d-flex justify-content-between align-items-center">
+                <div
+                    class="surface-header d-flex justify-content-between align-items-center"
+                >
 
                     <span>
 
@@ -497,7 +850,9 @@ function phodio_h(string $value): string
                     aria-live="polite"
                 >
 
-                    <div class="text-center py-5 text-secondary-custom">
+                    <div
+                        class="text-center py-5 text-secondary-custom"
+                    >
 
                         <i class="ri-camera-lens-line d-block fs-2 mb-2"></i>
 
@@ -530,7 +885,9 @@ function phodio_h(string $value): string
 
             <div class="surface">
 
-                <div class="surface-header d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2">
+                <div
+                    class="surface-header d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2"
+                >
 
                     <div>
 
@@ -539,6 +896,7 @@ function phodio_h(string $value): string
                         Appointment Calendar
 
                     </div>
+
 
                     <button
                         class="btn btn-primary btn-sm"
@@ -554,9 +912,11 @@ function phodio_h(string $value): string
 
                 </div>
 
+
                 <div id="calendar"></div>
 
             </div>
+
 
             <div class="small text-secondary-custom mt-2">
 
@@ -577,7 +937,9 @@ function phodio_h(string $value): string
 
             <div class="surface">
 
-                <div class="surface-header d-flex justify-content-between align-items-center">
+                <div
+                    class="surface-header d-flex justify-content-between align-items-center"
+                >
 
                     <span>
 
@@ -586,6 +948,7 @@ function phodio_h(string $value): string
                         Service Progress
 
                     </span>
+
 
                     <span
                         class="small text-secondary-custom"
@@ -607,7 +970,9 @@ function phodio_h(string $value): string
                     aria-live="polite"
                 >
 
-                    <div class="text-center py-5 text-secondary-custom">
+                    <div
+                        class="text-center py-5 text-secondary-custom"
+                    >
 
                         <i class="ri-cursor-line d-block fs-2 mb-2"></i>
 
@@ -645,7 +1010,9 @@ function phodio_h(string $value): string
     aria-hidden="true"
 >
 
-    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div
+        class="modal-dialog modal-lg modal-dialog-scrollable"
+    >
 
         <form
             id="bookingForm"
@@ -670,6 +1037,7 @@ function phodio_h(string $value): string
                     </h2>
 
                 </div>
+
 
                 <button
                     type="button"
@@ -697,7 +1065,6 @@ function phodio_h(string $value): string
 
 
                 <div class="row g-3">
-
 
                     <div class="col-md-6">
 
@@ -737,7 +1104,10 @@ function phodio_h(string $value): string
                             required
                         >
 
-                            <?php foreach ($serviceTypes as $key => $label): ?>
+                            <?php foreach (
+                                $serviceTypes
+                                as $key => $label
+                            ): ?>
 
                                 <option value="<?= phodio_h($key) ?>">
                                     <?= phodio_h($label) ?>
@@ -765,10 +1135,23 @@ function phodio_h(string $value): string
                             id="attendeeCount"
                             required
                         >
-                            <option value="1">1 person</option>
-                            <option value="2">2 people</option>
-                            <option value="3">3 people</option>
-                            <option value="4">4 people</option>
+
+                            <option value="1">
+                                1 person
+                            </option>
+
+                            <option value="2">
+                                2 people
+                            </option>
+
+                            <option value="3">
+                                3 people
+                            </option>
+
+                            <option value="4">
+                                4 people
+                            </option>
+
                         </select>
 
                     </div>
@@ -790,11 +1173,19 @@ function phodio_h(string $value): string
                             required
                         >
 
-                            <?php foreach ($groupedPackages as $category => $items): ?>
+                            <?php foreach (
+                                $groupedPackages
+                                as $category => $items
+                            ): ?>
 
-                                <optgroup label="<?= phodio_h($category) ?>">
+                                <optgroup
+                                    label="<?= phodio_h($category) ?>"
+                                >
 
-                                    <?php foreach ($items as $package): ?>
+                                    <?php foreach (
+                                        $items
+                                        as $package
+                                    ): ?>
 
                                         <option
                                             value="<?= phodio_h($package['key']) ?>"
@@ -910,6 +1301,7 @@ function phodio_h(string $value): string
                             class="form-label"
                             for="clientNotes"
                         >
+
                             Requirements or special requests
 
                             <span class="text-secondary-custom fw-normal">
@@ -917,6 +1309,7 @@ function phodio_h(string $value): string
                             </span>
 
                         </label>
+
 
                         <textarea
                             class="form-control"
@@ -932,7 +1325,9 @@ function phodio_h(string $value): string
                 </div>
 
 
-                <div class="alert alert-dark border-secondary small mt-3 mb-0">
+                <div
+                    class="alert alert-dark border-secondary small mt-3 mb-0"
+                >
 
                     <i class="ri-information-line me-1"></i>
 
@@ -962,6 +1357,7 @@ function phodio_h(string $value): string
                     Back
                 </button>
 
+
                 <button
                     type="submit"
                     class="btn btn-primary px-4"
@@ -979,7 +1375,9 @@ function phodio_h(string $value): string
 </div>
 
 
-<div class="toast-container position-fixed bottom-0 end-0 p-3">
+<div
+    class="toast-container position-fixed bottom-0 end-0 p-3"
+>
 
     <div
         class="toast text-bg-dark border-secondary"
@@ -995,6 +1393,7 @@ function phodio_h(string $value): string
                 class="toast-body"
                 id="clientToastMessage"
             ></div>
+
 
             <button
                 type="button"
@@ -1014,28 +1413,55 @@ function phodio_h(string $value): string
 
 <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
 
+
 <script>
-const bookingForm = document.getElementById('bookingForm');
-const bookingModal = new bootstrap.Modal(document.getElementById('bookingModal'));
-const toast = new bootstrap.Toast(document.getElementById('clientToast'), {delay: 4200});
-const bookingError = document.getElementById('bookingError');
-const dateInput = document.getElementById('bookingDate');
-const periodSelect = document.getElementById('bookingPeriod');
-const packageSelect = document.getElementById('packageSelect');
-const attendeeSelect = document.getElementById('attendeeCount');
+const bookingForm =
+    document.getElementById('bookingForm');
+
+const bookingModal =
+    new bootstrap.Modal(
+        document.getElementById('bookingModal')
+    );
+
+const toast =
+    new bootstrap.Toast(
+        document.getElementById('clientToast'),
+        {delay:4200}
+    );
+
+const bookingError =
+    document.getElementById('bookingError');
+
+const dateInput =
+    document.getElementById('bookingDate');
+
+const periodSelect =
+    document.getElementById('bookingPeriod');
+
+const packageSelect =
+    document.getElementById('packageSelect');
+
+const attendeeSelect =
+    document.getElementById('attendeeCount');
 
 let bookingCalendar = null;
+
 let selectedBookingId = null;
+
 let editingBookingId = null;
 
 const queryBookingId =
     Number(
-        new URLSearchParams(window.location.search).get('booking')
+        new URLSearchParams(
+            window.location.search
+        ).get('booking')
     ) || null;
 
 let openedLinkedBooking = false;
 
+
 function escapeHtml(value) {
+
     return String(value ?? '').replace(
         /[&<>"']/g,
         char => ({
@@ -1048,15 +1474,22 @@ function escapeHtml(value) {
     );
 }
 
+
 async function parseApiResponse(response) {
 
-    const body = await response.text();
+    const body =
+        await response.text();
 
     try {
+
         return JSON.parse(body);
+
     } catch (error) {
 
-        if (/<(?:!doctype|html|br|b|div)\b/i.test(body.slice(0, 500))) {
+        if (
+            /<(?:!doctype|html|br|b|div)\b/i
+                .test(body.slice(0,500))
+        ) {
 
             throw new Error(
                 `The server returned an HTML error (HTTP ${response.status}) instead of JSON. Check the PHP error and endpoint files.`
@@ -1069,35 +1502,56 @@ async function parseApiResponse(response) {
     }
 }
 
+
 function showToast(message) {
 
     document.getElementById(
         'clientToastMessage'
-    ).textContent = message;
+    ).textContent =
+        message;
 
     toast.show();
 }
 
-function eventHasReservedPeriod(date, period) {
 
-    if (!bookingCalendar) return false;
+function eventHasReservedPeriod(
+    date,
+    period
+) {
 
-    return bookingCalendar.getEvents().some(
-        event =>
-            event.startStr.slice(0, 10) === date &&
-            event.extendedProps.period === period &&
-            event.extendedProps.reserved &&
-            String(event.id) !== String(editingBookingId || '')
-    );
-}
-
-function periodHasStarted(date, period) {
-
-    if (date !== '<?= phodio_h($today) ?>') {
+    if (!bookingCalendar) {
         return false;
     }
 
-    const now = new Date();
+    return bookingCalendar
+        .getEvents()
+        .some(
+            event =>
+                event.startStr.slice(0,10) === date &&
+                event.extendedProps.period === period &&
+                event.extendedProps.reserved &&
+                String(event.id) !==
+                    String(
+                        editingBookingId || ''
+                    )
+        );
+}
+
+
+function periodHasStarted(
+    date,
+    period
+) {
+
+    if (
+        date !==
+        '<?= phodio_h($today) ?>'
+    ) {
+        return false;
+    }
+
+    const now =
+        new Date();
 
     const currentMinutes =
         now.getHours() * 60 +
@@ -1110,9 +1564,13 @@ function periodHasStarted(date, period) {
     );
 }
 
-function updatePeriodAvailability(preferred = null) {
 
-    const date = dateInput.value;
+function updatePeriodAvailability(
+    preferred = null
+) {
+
+    const date =
+        dateInput.value;
 
     const previous =
         preferred ||
@@ -1120,51 +1578,56 @@ function updatePeriodAvailability(preferred = null) {
 
     const options = [
         {
-            value: 'AM',
-            label: 'Morning · 9:00 AM'
+            value:'AM',
+            label:'Morning · 9:00 AM'
         },
         {
-            value: 'PM',
-            label: 'Afternoon · 1:00 PM'
+            value:'PM',
+            label:'Afternoon · 1:00 PM'
         }
     ];
 
-    options.forEach(item => {
+    options.forEach(
+        item => {
 
-        const option =
-            periodSelect.querySelector(
-                `option[value="${item.value}"]`
-            );
+            const option =
+                periodSelect.querySelector(
+                    `option[value="${item.value}"]`
+                );
 
-        const taken =
-            date &&
-            eventHasReservedPeriod(
-                date,
-                item.value
-            );
+            const taken =
+                date &&
+                eventHasReservedPeriod(
+                    date,
+                    item.value
+                );
 
-        const started =
-            date &&
-            periodHasStarted(
-                date,
-                item.value
-            );
+            const started =
+                date &&
+                periodHasStarted(
+                    date,
+                    item.value
+                );
 
-        option.disabled =
-            Boolean(taken || started);
+            option.disabled =
+                Boolean(
+                    taken ||
+                    started
+                );
 
-        option.textContent =
-            item.label +
-            (
-                taken
-                    ? ' · Reserved'
-                    : (
-                        started
-                            ? ' · Started'
-                            : ''
-                    )
-            );
-    });
+            option.textContent =
+                item.label +
+                (
+                    taken
+                        ? ' · Reserved'
+                        : (
+                            started
+                                ? ' · Started'
+                                : ''
+                        )
+                );
+        }
+    );
 
     const available =
         options.filter(
@@ -1182,7 +1645,9 @@ function updatePeriodAvailability(preferred = null) {
                 )
         );
 
-    if (available.length === 0) {
+    if (
+        available.length === 0
+    ) {
 
         periodSelect.value = '';
 
@@ -1204,12 +1669,15 @@ function updatePeriodAvailability(preferred = null) {
     }
 }
 
+
 function refreshPackageDetails() {
 
     const option =
         packageSelect.selectedOptions[0];
 
-    if (!option) return;
+    if (!option) {
+        return;
+    }
 
     document.getElementById(
         'packagePriceText'
@@ -1217,7 +1685,8 @@ function refreshPackageDetails() {
         `Package price: ₱${Number(
             option.dataset.price
         ).toLocaleString()} · supports ${
-            option.dataset.min === option.dataset.max
+            option.dataset.min ===
+            option.dataset.max
                 ? option.dataset.max
                 : `${option.dataset.min}–${option.dataset.max}`
         } ${
@@ -1227,21 +1696,34 @@ function refreshPackageDetails() {
         }.`;
 
     const count =
-        Number(attendeeSelect.value);
+        Number(
+            attendeeSelect.value
+        );
 
     const min =
-        Number(option.dataset.min);
+        Number(
+            option.dataset.min
+        );
 
     const max =
-        Number(option.dataset.max);
+        Number(
+            option.dataset.max
+        );
 
-    if (count < min || count > max) {
+    if (
+        count < min ||
+        count > max
+    ) {
+
         attendeeSelect.value =
             String(min);
     }
 }
 
-function resetBookingForm(date = '') {
+
+function resetBookingForm(
+    date = ''
+) {
 
     bookingForm.reset();
 
@@ -1265,19 +1747,26 @@ function resetBookingForm(date = '') {
         'd-none'
     );
 
-    dateInput.value = date;
+    dateInput.value =
+        date;
 
     dateInput.min =
         '<?= phodio_h($today) ?>';
 
-    attendeeSelect.value = '1';
+    attendeeSelect.value =
+        '1';
 
     refreshPackageDetails();
 
-    updatePeriodAvailability('AM');
+    updatePeriodAvailability(
+        'AM'
+    );
 }
 
-function buildProgressHtml(booking) {
+
+function buildProgressHtml(
+    booking
+) {
 
     const statusClass = {
 
@@ -1302,54 +1791,78 @@ function buildProgressHtml(booking) {
         'Cancelled':
             'status-cancelled'
 
-    }[booking.status] ||
+    }[
+        booking.status
+    ] ||
         'status-pending';
+
 
     const time =
         booking.period === 'AM'
             ? '9:00 AM · Morning'
             : '1:00 PM · Afternoon';
 
+
     const updates =
-        Array.isArray(booking.updates)
+        Array.isArray(
+            booking.updates
+        )
             ? booking.updates
             : [];
+
 
     const history =
         updates.length
 
-            ? updates.map(item => `
+            ? updates.map(
+                item => `
 
-                <div class="timeline-item">
+                    <div class="timeline-item">
 
-                    <div class="d-flex justify-content-between gap-2">
+                        <div
+                            class="d-flex justify-content-between gap-2"
+                        >
 
-                        <strong>
-                            ${escapeHtml(item.status)}
-                        </strong>
+                            <strong>
+                                ${escapeHtml(
+                                    item.status
+                                )}
+                            </strong>
 
-                        <small class="text-secondary-custom">
-                            ${escapeHtml(item.created_at)}
-                        </small>
+                            <small
+                                class="text-secondary-custom"
+                            >
+                                ${escapeHtml(
+                                    item.created_at
+                                )}
+                            </small>
+
+                        </div>
+
+                        <div
+                            class="small text-secondary-custom mt-1"
+                        >
+                            ${escapeHtml(
+                                item.note ||
+                                'Status updated by the studio.'
+                            )}
+                        </div>
 
                     </div>
 
-                    <div class="small text-secondary-custom mt-1">
-                        ${escapeHtml(
-                            item.note ||
-                            'Status updated by the studio.'
-                        )}
-                    </div>
-
-                </div>
-
-            `).join('')
+                `
+            ).join('')
 
             : `
-                <p class="small text-secondary-custom mb-0">
+
+                <p
+                    class="small text-secondary-custom mb-0"
+                >
                     No progress updates have been posted yet.
                 </p>
+
             `;
+
 
     const appointmentPassed =
         booking.booking_date <
@@ -1359,26 +1872,38 @@ function buildProgressHtml(booking) {
             booking.period
         );
 
+
     const canEdit =
         booking.status === 'Pending' &&
         !appointmentPassed;
 
+
     const canCancel =
-        ['Pending', 'Confirmed']
-            .includes(booking.status) &&
-        !appointmentPassed;
+        [
+            'Pending',
+            'Confirmed'
+        ].includes(
+            booking.status
+        );
+
 
     return `
 
-        <div class="d-flex justify-content-between align-items-start gap-2 mb-3">
+        <div
+            class="d-flex justify-content-between align-items-start gap-2 mb-3"
+        >
 
             <div>
 
                 <h3 class="h6 mb-1">
-                    ${escapeHtml(booking.title)}
+                    ${escapeHtml(
+                        booking.title
+                    )}
                 </h3>
 
-                <div class="small text-secondary-custom">
+                <div
+                    class="small text-secondary-custom"
+                >
                     ${escapeHtml(
                         booking.package_type ||
                         'Photography service'
@@ -1387,31 +1912,49 @@ function buildProgressHtml(booking) {
 
             </div>
 
-            <span class="status-chip ${statusClass}">
-                ${escapeHtml(booking.status)}
+
+            <span
+                class="status-chip ${statusClass}"
+            >
+                ${escapeHtml(
+                    booking.status
+                )}
             </span>
 
         </div>
 
 
-        <table class="table table-borderless table-sm text-white booking-table mb-3">
+        <table
+            class="table table-borderless table-sm text-white booking-table mb-3"
+        >
 
             <tr>
                 <td>Session type</td>
-                <td>${escapeHtml(
-                    booking.service_type || '—'
-                )}</td>
+
+                <td>
+                    ${escapeHtml(
+                        booking.service_type ||
+                        '—'
+                    )}
+                </td>
             </tr>
+
 
             <tr>
                 <td>Package</td>
-                <td>${escapeHtml(
-                    booking.package_type || '—'
-                )}</td>
+
+                <td>
+                    ${escapeHtml(
+                        booking.package_type ||
+                        '—'
+                    )}
+                </td>
             </tr>
+
 
             <tr>
                 <td>Price</td>
+
                 <td>
                     ₱${Number(
                         booking.price || 0
@@ -1419,33 +1962,47 @@ function buildProgressHtml(booking) {
                 </td>
             </tr>
 
+
             <tr>
                 <td>Theme</td>
-                <td>${escapeHtml(
-                    booking.motif || '—'
-                )}</td>
+
+                <td>
+                    ${escapeHtml(
+                        booking.motif ||
+                        '—'
+                    )}
+                </td>
             </tr>
+
 
             <tr>
                 <td>Group size</td>
+
                 <td>
+
                     ${Number(
-                        booking.attendee_count || 1
+                        booking.attendee_count ||
+                        1
                     )}
 
                     ${
                         Number(
-                            booking.attendee_count || 1
+                            booking.attendee_count ||
+                            1
                         ) === 1
                             ? 'person'
                             : 'people'
                     }
+
                 </td>
             </tr>
 
+
             <tr>
                 <td>Schedule</td>
+
                 <td>
+
                     ${escapeHtml(
                         booking.booking_date
                     )}
@@ -1453,20 +2010,29 @@ function buildProgressHtml(booking) {
                     ·
 
                     ${time}
+
                 </td>
             </tr>
+
 
             ${
                 booking.status_note
                     ? `
+
                         <tr>
-                            <td>Latest note</td>
+
+                            <td>
+                                Latest note
+                            </td>
+
                             <td>
                                 ${escapeHtml(
                                     booking.status_note
                                 )}
                             </td>
+
                         </tr>
+
                     `
                     : ''
             }
@@ -1474,34 +2040,47 @@ function buildProgressHtml(booking) {
         </table>
 
 
-        <div class="d-flex gap-2 mb-4">
+        <div
+            class="d-flex gap-2 mb-4"
+        >
 
             ${
                 canEdit
                     ? `
+
                         <button
                             type="button"
                             class="btn btn-sm btn-outline-light"
                             id="editBookingButton"
                         >
+
                             <i class="ri-edit-line me-1"></i>
+
                             Edit request
+
                         </button>
+
                     `
                     : ''
             }
 
+
             ${
                 canCancel
                     ? `
+
                         <button
                             type="button"
                             class="btn btn-sm btn-outline-danger"
                             id="cancelBookingButton"
                         >
+
                             <i class="ri-close-circle-line me-1"></i>
+
                             Cancel request
+
                         </button>
+
                     `
                     : ''
             }
@@ -1509,9 +2088,13 @@ function buildProgressHtml(booking) {
         </div>
 
 
-        <div class="fw-bold small mb-3">
+        <div
+            class="fw-bold small mb-3"
+        >
 
-            <i class="ri-git-commit-line me-1 text-danger"></i>
+            <i
+                class="ri-git-commit-line me-1 text-danger"
+            ></i>
 
             Progress updates
 
@@ -1527,6 +2110,7 @@ function buildProgressHtml(booking) {
     `;
 }
 
+
 async function loadBookingDetails(
     id,
     silent = false
@@ -1538,41 +2122,49 @@ async function loadBookingDetails(
             await fetch(
                 'get_client_booking_details.php',
                 {
-                    method: 'POST',
+                    method:'POST',
 
-                    headers: {
+                    headers:{
                         'Content-Type':
                             'application/x-www-form-urlencoded'
                     },
 
                     body:
                         new URLSearchParams({
-                            id: String(id)
+                            id:String(id)
                         })
                 }
             );
+
 
         const data =
             await parseApiResponse(
                 response
             );
 
+
         if (
             !response.ok ||
             !data.ok
         ) {
+
             throw new Error(
                 data.message ||
                 'Could not load this booking.'
             );
         }
 
+
         selectedBookingId =
-            Number(data.booking.id);
+            Number(
+                data.booking.id
+            );
+
 
         if (
             !openedLinkedBooking &&
-            queryBookingId === selectedBookingId &&
+            queryBookingId ===
+                selectedBookingId &&
             bookingCalendar
         ) {
 
@@ -1583,20 +2175,24 @@ async function loadBookingDetails(
             openedLinkedBooking = true;
         }
 
+
         const pane =
             document.getElementById(
                 'details-pane'
             );
+
 
         pane.innerHTML =
             buildProgressHtml(
                 data.booking
             );
 
+
         const editButton =
             document.getElementById(
                 'editBookingButton'
             );
+
 
         if (editButton) {
 
@@ -1609,10 +2205,12 @@ async function loadBookingDetails(
             );
         }
 
+
         const cancelButton =
             document.getElementById(
                 'cancelBookingButton'
             );
+
 
         if (cancelButton) {
 
@@ -1628,6 +2226,7 @@ async function loadBookingDetails(
     } catch (error) {
 
         if (!silent) {
+
             showToast(
                 error.message
             );
@@ -1635,34 +2234,45 @@ async function loadBookingDetails(
     }
 }
 
-function editBooking(booking) {
+
+function editBooking(
+    booking
+) {
 
     resetBookingForm(
         booking.booking_date
     );
 
+
     editingBookingId =
-        Number(booking.id);
+        Number(
+            booking.id
+        );
+
 
     document.getElementById(
         'bookingIdInput'
     ).value =
         booking.id;
 
+
     document.getElementById(
         'modalTitle'
     ).textContent =
         'Edit pending request';
+
 
     document.getElementById(
         'saveBookingButton'
     ).textContent =
         'Update request';
 
+
     document.getElementById(
         'sessionTitle'
     ).value =
         booking.title || '';
+
 
     document.getElementById(
         'serviceType'
@@ -1670,11 +2280,13 @@ function editBooking(booking) {
         booking.service_type ||
         'portrait';
 
+
     attendeeSelect.value =
         String(
             booking.attendee_count ||
             1
         );
+
 
     if (
         booking.package_key &&
@@ -1689,27 +2301,37 @@ function editBooking(booking) {
             booking.package_key;
     }
 
+
     document.getElementById(
         'motif'
     ).value =
         booking.motif || '';
+
 
     document.getElementById(
         'clientNotes'
     ).value =
         booking.client_notes || '';
 
+
     periodSelect.value =
-        booking.period || 'AM';
+        booking.period ||
+        'AM';
+
 
     updatePeriodAvailability(
-        booking.period || 'AM'
+        booking.period ||
+        'AM'
     );
+
 
     bookingModal.show();
 }
 
-async function cancelBooking(id) {
+
+async function cancelBooking(
+    id
+) {
 
     if (
         !window.confirm(
@@ -1719,18 +2341,22 @@ async function cancelBooking(id) {
         return;
     }
 
+
     const formData =
         new FormData();
+
 
     formData.set(
         'action',
         'cancel'
     );
 
+
     formData.set(
         'booking_id',
         String(id)
     );
+
 
     try {
 
@@ -1738,31 +2364,37 @@ async function cancelBooking(id) {
             await fetch(
                 'process_client_booking.php',
                 {
-                    method: 'POST',
-                    body: formData
+                    method:'POST',
+                    body:formData
                 }
             );
+
 
         const data =
             await parseApiResponse(
                 response
             );
 
+
         if (
             !response.ok ||
             !data.ok
         ) {
+
             throw new Error(
                 data.message ||
                 'Unable to cancel this request.'
             );
         }
 
+
         showToast(
             data.message
         );
 
+
         bookingCalendar.refetchEvents();
+
 
         await loadBookingDetails(
             id,
@@ -1783,6 +2415,7 @@ const calendarEl =
         'calendar'
     );
 
+
 bookingCalendar =
     new FullCalendar.Calendar(
         calendarEl,
@@ -1797,7 +2430,7 @@ bookingCalendar =
             events:
                 'load_client_events.php',
 
-            headerToolbar: {
+            headerToolbar:{
                 left:
                     'prev,next today',
 
@@ -1811,7 +2444,7 @@ bookingCalendar =
             selectable:
                 false,
 
-            eventTimeFormat: {
+            eventTimeFormat:{
                 hour:
                     'numeric',
 
@@ -1821,6 +2454,7 @@ bookingCalendar =
                 meridiem:
                     'short'
             },
+
 
             eventClick(info) {
 
@@ -1842,6 +2476,7 @@ bookingCalendar =
                 }
             },
 
+
             dateClick(info) {
 
                 const date =
@@ -1849,6 +2484,7 @@ bookingCalendar =
                         0,
                         10
                     );
+
 
                 if (
                     date <
@@ -1862,6 +2498,7 @@ bookingCalendar =
                     return;
                 }
 
+
                 const amTaken =
                     eventHasReservedPeriod(
                         date,
@@ -1872,6 +2509,7 @@ bookingCalendar =
                         'AM'
                     );
 
+
                 const pmTaken =
                     eventHasReservedPeriod(
                         date,
@@ -1881,6 +2519,7 @@ bookingCalendar =
                         date,
                         'PM'
                     );
+
 
                 if (
                     amTaken &&
@@ -1894,9 +2533,11 @@ bookingCalendar =
                     return;
                 }
 
+
                 resetBookingForm(
                     date
                 );
+
 
                 updatePeriodAvailability(
                     amTaken
@@ -1904,8 +2545,10 @@ bookingCalendar =
                         : 'AM'
                 );
 
+
                 bookingModal.show();
             },
+
 
             eventsSet() {
 
@@ -1922,10 +2565,12 @@ bookingCalendar =
         }
     );
 
+
 bookingCalendar.render();
 
 
 if (queryBookingId) {
+
     loadBookingDetails(
         queryBookingId
     );
@@ -1975,9 +2620,11 @@ bookingForm.addEventListener(
 
         event.preventDefault();
 
+
         bookingError.classList.add(
             'd-none'
         );
+
 
         if (
             !bookingForm.reportValidity()
@@ -1985,15 +2632,20 @@ bookingForm.addEventListener(
             return;
         }
 
+
         const button =
             document.getElementById(
                 'saveBookingButton'
             );
 
-        button.disabled = true;
+
+        button.disabled =
+            true;
+
 
         button.innerHTML =
             '<span class="spinner-border spinner-border-sm me-2"></span>Saving request';
+
 
         try {
 
@@ -2003,7 +2655,8 @@ bookingForm.addEventListener(
                         'action'
                     ),
                     {
-                        method: 'POST',
+                        method:'POST',
+
                         body:
                             new FormData(
                                 bookingForm
@@ -2011,10 +2664,12 @@ bookingForm.addEventListener(
                     }
                 );
 
+
             const data =
                 await parseApiResponse(
                     response
                 );
+
 
             if (
                 !response.ok ||
@@ -2027,18 +2682,23 @@ bookingForm.addEventListener(
                 );
             }
 
+
             bookingModal.hide();
+
 
             showToast(
                 data.message
             );
 
+
             bookingCalendar.refetchEvents();
+
 
             selectedBookingId =
                 Number(
                     data.booking_id
                 );
+
 
             setTimeout(
                 () =>
@@ -2060,7 +2720,8 @@ bookingForm.addEventListener(
 
         } finally {
 
-            button.disabled = false;
+            button.disabled =
+                false;
 
             button.textContent =
                 document.getElementById(
@@ -2083,26 +2744,34 @@ document
 
             event.preventDefault();
 
+
             const form =
                 event.currentTarget;
+
 
             const button =
                 document.getElementById(
                     'recommendButton'
                 );
 
+
             const results =
                 document.getElementById(
                     'recommendationResults'
                 );
 
-            button.disabled = true;
+
+            button.disabled =
+                true;
+
 
             button.innerHTML =
                 '<span class="spinner-border spinner-border-sm me-2"></span>Finding matches';
 
+
             results.innerHTML =
                 '<div class="text-center py-5 text-secondary-custom"><span class="spinner-border spinner-border-sm me-2"></span>Matching your preferences to studio packages…</div>';
+
 
             try {
 
@@ -2110,7 +2779,8 @@ document
                     await fetch(
                         'recommend_packages.php',
                         {
-                            method: 'POST',
+                            method:'POST',
+
                             body:
                                 new FormData(
                                     form
@@ -2118,10 +2788,12 @@ document
                         }
                     );
 
+
                 const data =
                     await parseApiResponse(
                         response
                     );
+
 
                 if (
                     !response.ok ||
@@ -2134,6 +2806,7 @@ document
                     );
                 }
 
+
                 if (
                     !data.recommendations.length
                 ) {
@@ -2144,25 +2817,34 @@ document
                     return;
                 }
 
+
                 results.innerHTML =
                     `<div class="row g-3">${
                         data.recommendations
                             .map(
-                                (item, index) => `
+                                (item,index) => `
 
-                                    <div class="col-12 ${
-                                        data.recommendations.length > 1
-                                            ? 'col-md-6'
-                                            : ''
-                                    }">
+                                    <div
+                                        class="col-12 ${
+                                            data.recommendations.length > 1
+                                                ? 'col-md-6'
+                                                : ''
+                                        }"
+                                    >
 
-                                        <article class="rec-card">
+                                        <article
+                                            class="rec-card"
+                                        >
 
-                                            <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+                                            <div
+                                                class="d-flex justify-content-between align-items-start gap-2 mb-2"
+                                            >
 
                                                 <div>
 
-                                                    <div class="small text-secondary-custom">
+                                                    <div
+                                                        class="small text-secondary-custom"
+                                                    >
 
                                                         ${escapeHtml(
                                                             item.category
@@ -2176,7 +2858,10 @@ document
 
                                                     </div>
 
-                                                    <h3 class="h6 fw-bold mt-1 mb-0">
+
+                                                    <h3
+                                                        class="h6 fw-bold mt-1 mb-0"
+                                                    >
 
                                                         ${escapeHtml(
                                                             item.name
@@ -2186,7 +2871,10 @@ document
 
                                                 </div>
 
-                                                <span class="badge match-score">
+
+                                                <span
+                                                    class="badge match-score"
+                                                >
 
                                                     ${Number(
                                                         item.score
@@ -2197,7 +2885,9 @@ document
                                             </div>
 
 
-                                            <div class="d-flex gap-3 my-3">
+                                            <div
+                                                class="d-flex gap-3 my-3"
+                                            >
 
                                                 <strong>
                                                     ₱${Number(
@@ -2205,7 +2895,9 @@ document
                                                     ).toLocaleString()}
                                                 </strong>
 
-                                                <span class="text-secondary-custom">
+                                                <span
+                                                    class="text-secondary-custom"
+                                                >
 
                                                     ${escapeHtml(
                                                         item.duration
@@ -2216,7 +2908,9 @@ document
                                             </div>
 
 
-                                            <ul class="list-unstyled rec-reason mb-3">
+                                            <ul
+                                                class="list-unstyled rec-reason mb-3"
+                                            >
 
                                                 ${item.reasons
                                                     .map(
@@ -2279,14 +2973,18 @@ document
                                             )}"]`
                                         );
 
+
                                     if (!option) {
                                         return;
                                     }
 
+
                                     resetBookingForm('');
+
 
                                     packageSelect.value =
                                         button.dataset.key;
+
 
                                     document.getElementById(
                                         'serviceType'
@@ -2295,10 +2993,12 @@ document
                                             'recEventType'
                                         ).value;
 
+
                                     attendeeSelect.value =
                                         document.getElementById(
                                             'recPeople'
                                         ).value;
+
 
                                     document.getElementById(
                                         'sessionTitle'
@@ -2309,6 +3009,7 @@ document
                                         .selectedOptions[0]
                                         .text;
 
+
                                     document.getElementById(
                                         'motif'
                                     ).value =
@@ -2318,6 +3019,7 @@ document
                                         .selectedOptions[0]
                                         .text;
 
+
                                     document.getElementById(
                                         'clientNotes'
                                     ).value =
@@ -2325,7 +3027,9 @@ document
                                             'recRequirements'
                                         ).value;
 
+
                                     refreshPackageDetails();
+
 
                                     bookingModal.show();
                                 }
@@ -2343,7 +3047,8 @@ document
 
             } finally {
 
-                button.disabled = false;
+                button.disabled =
+                    false;
 
                 button.innerHTML =
                     '<i class="ri-magic-line me-2"></i>Recommend packages';
@@ -2372,4 +3077,3 @@ setInterval(
 
 </body>
 </html>
-```
