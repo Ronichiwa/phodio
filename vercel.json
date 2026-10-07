@@ -15,6 +15,10 @@
       "dest": "/api/health.php"
     },
     {
+      "src": "/session_test.php",
+      "dest": "/api/session_test.php"
+    },
+    {
       "src": "/client_login.php",
       "dest": "/api/client_login.php"
     },
@@ -49,6 +53,10 @@
     {
       "src": "/recommend_packages.php",
       "dest": "/api/recommend_packages.php"
+    },
+    {
+      "src": "/(.*\\.php)",
+      "dest": "/api/$1"
     }
   ]
 }
