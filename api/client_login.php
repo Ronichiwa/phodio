@@ -21,12 +21,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
 
         try {
 
-            /*
-             * Use PDO directly for PostgreSQL/Supabase.
-             */
+            // Use PDO directly for Supabase PostgreSQL
             $pdo = $conn->pdo();
 
-            // Find the client by Gmail
             $stmt = $pdo->prepare(
                 'SELECT
                     id,
@@ -59,24 +56,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
 
             } else {
 
-                /*
-                 * Login successful.
-                 *
-                 * These session variables are used by the
-                 * booking/dashboard system.
-                 */
+                // Regenerate the session ID after successful login
+                session_regenerate_id(true);
+
                 $_SESSION['client_id'] = $user['id'];
                 $_SESSION['client'] = $username;
                 $_SESSION['client_name'] =
                     $user['firstname'] . ' ' . $user['lastname'];
 
                 /*
-                 * Regenerate the session ID after login
-                 * for better session security.
+                 * Vercel route:
+                 * /client_dashboard.php
+                 *
+                 * Do not use a relative redirect here.
                  */
-                session_regenerate_id(true);
-
-                header('Location: client_dashboard.php');
+                header('Location: /client_dashboard.php');
                 exit;
             }
 
@@ -143,7 +137,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
             border-radius: 15px;
             width: 100%;
             max-width: 400px;
-            box-shadow: 0 20px 50px rgba(0,0,0,0.6);
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
             border: 1px solid #333;
             margin: 15px;
         }
@@ -235,11 +229,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
 <div class="login-card text-center">
 
     <div class="brand-logo">
-
         SOUL<span style="color:var(--accent-red)">
             PRINT
         </span>
-
     </div>
 
     <p class="text-muted small mb-4 text-uppercase fw-bold">
@@ -338,7 +330,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
 
         Don't have an account?
 
-        <a href="register.php">
+        <a href="/register.php">
             Create one
         </a>
 
@@ -357,19 +349,23 @@ const password =
 const eyeIcon =
     document.querySelector('#eyeIcon');
 
-togglePassword.addEventListener('click', function () {
+if (togglePassword && password && eyeIcon) {
 
-    const type =
-        password.getAttribute('type') === 'password'
-            ? 'text'
-            : 'password';
+    togglePassword.addEventListener('click', function () {
 
-    password.setAttribute('type', type);
+        const type =
+            password.getAttribute('type') === 'password'
+                ? 'text'
+                : 'password';
 
-    eyeIcon.classList.toggle('ri-eye-line');
-    eyeIcon.classList.toggle('ri-eye-off-line');
+        password.setAttribute('type', type);
 
-});
+        eyeIcon.classList.toggle('ri-eye-line');
+        eyeIcon.classList.toggle('ri-eye-off-line');
+
+    });
+
+}
 
 </script>
 
