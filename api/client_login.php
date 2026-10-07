@@ -1,45 +1,124 @@
 <?php
-session_start();
+
 require_once __DIR__ . '/config/database.php';
 
-if (isset($_POST['login'])) {
-    $username = trim($_POST['username']);
-    $password = trim($_POST['password']);
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
 
-    $stmt = $conn->prepare("SELECT id, firstname, lastname, password FROM users WHERE username=?");
-    $stmt->bind_param("s", $username);
-    $stmt->execute();
-    $result = $stmt->get_result();
+$error = '';
 
-    if ($result->num_rows > 0) {
-        $user = $result->fetch_assoc();
-        if (password_verify($password, $user['password'])) {
-            // ✅ Set sessions
-            $_SESSION['client_id'] = $user['id'];      // Important for bookings
-            $_SESSION['client'] = $username;           // Optional, for display
-            $_SESSION['client_name'] = $user['firstname'] . ' ' . $user['lastname'];
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
 
-            header("Location: client_dashboard.php");
-            exit;
-        } else {
-            $error = "Invalid password";
-        }
+    $username = trim($_POST['username'] ?? '');
+    $password = $_POST['password'] ?? '';
+
+    if ($username === '' || $password === '') {
+
+        $error = 'Please enter your Gmail and password.';
+
     } else {
-        $error = "User not found";
+
+        try {
+
+            /*
+             * Use PDO directly for PostgreSQL/Supabase.
+             */
+            $pdo = $conn->pdo();
+
+            // Find the client by Gmail
+            $stmt = $pdo->prepare(
+                'SELECT
+                    id,
+                    firstname,
+                    lastname,
+                    password
+                 FROM users
+                 WHERE username = :username
+                 LIMIT 1'
+            );
+
+            $stmt->execute([
+                ':username' => $username
+            ]);
+
+            $user = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if (!$user) {
+
+                $error = 'User not found.';
+
+            } elseif (
+                !password_verify(
+                    $password,
+                    $user['password']
+                )
+            ) {
+
+                $error = 'Invalid password.';
+
+            } else {
+
+                /*
+                 * Login successful.
+                 *
+                 * These session variables are used by the
+                 * booking/dashboard system.
+                 */
+                $_SESSION['client_id'] = $user['id'];
+                $_SESSION['client'] = $username;
+                $_SESSION['client_name'] =
+                    $user['firstname'] . ' ' . $user['lastname'];
+
+                /*
+                 * Regenerate the session ID after login
+                 * for better session security.
+                 */
+                session_regenerate_id(true);
+
+                header('Location: client_dashboard.php');
+                exit;
+            }
+
+        } catch (PDOException $e) {
+
+            $error = 'Database error: ' . $e->getMessage();
+
+        } catch (Throwable $e) {
+
+            $error = 'Application error: ' . $e->getMessage();
+        }
     }
 }
+
 ?>
+
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
+
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
     <title>Client Login | SOULPRINT</title>
 
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/remixicon@2.5.0/fonts/remixicon.css" rel="stylesheet">
+    <link
+        href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
+        rel="stylesheet"
+    >
+
+    <link
+        href="https://cdn.jsdelivr.net/npm/remixicon@2.5.0/fonts/remixicon.css"
+        rel="stylesheet"
+    >
 
     <style>
+
         :root {
             --bg-dark: #0f0f0f;
             --card-bg: #1a1a1a;
@@ -146,74 +225,158 @@ if (isset($_POST['login'])) {
         .switch-link a:hover {
             text-decoration: underline;
         }
+
     </style>
+
 </head>
+
 <body>
 
 <div class="login-card text-center">
-    <div class="brand-logo">
-        SOUL<span style="color:var(--accent-red)">PRINT</span>
-    </div>
-    <p class="text-muted small mb-4 text-uppercase fw-bold">Client Portal</p>
 
-    <?php if(isset($error)): ?>
+    <div class="brand-logo">
+
+        SOUL<span style="color:var(--accent-red)">
+            PRINT
+        </span>
+
+    </div>
+
+    <p class="text-muted small mb-4 text-uppercase fw-bold">
+        Client Portal
+    </p>
+
+    <?php if ($error !== ''): ?>
+
         <div class="error-msg">
-            <i class="ri-error-warning-line me-2"></i> <?= $error ?>
+
+            <i class="ri-error-warning-line me-2"></i>
+
+            <?= htmlspecialchars($error) ?>
+
         </div>
+
     <?php endif; ?>
 
     <form method="POST">
+
         <div class="mb-3 text-start">
-            <label class="form-label small fw-bold text-uppercase">Gmail</label>
+
+            <label class="form-label small fw-bold text-uppercase">
+                Gmail
+            </label>
+
             <div class="input-group">
+
                 <span class="input-group-text bg-transparent">
                     <i class="ri-mail-line"></i>
                 </span>
-                <input type="text" name="username" class="form-control" placeholder="Enter Gmail" required>
+
+                <input
+                    type="text"
+                    name="username"
+                    class="form-control"
+                    placeholder="Enter Gmail"
+                    value="<?= htmlspecialchars($_POST['username'] ?? '') ?>"
+                    required
+                >
+
             </div>
+
         </div>
 
         <div class="mb-4 text-start">
-            <label class="form-label small fw-bold text-uppercase">Password</label>
+
+            <label class="form-label small fw-bold text-uppercase">
+                Password
+            </label>
+
             <div class="input-group">
+
                 <span class="input-group-text bg-transparent">
                     <i class="ri-lock-2-line"></i>
                 </span>
-                <input type="password" name="password" id="passwordInput" class="form-control" placeholder="••••••••" required>
-                <span class="input-group-text bg-transparent" id="togglePassword">
-                    <i class="ri-eye-line" id="eyeIcon"></i>
+
+                <input
+                    type="password"
+                    name="password"
+                    id="passwordInput"
+                    class="form-control"
+                    placeholder="••••••••"
+                    required
+                >
+
+                <span
+                    class="input-group-text bg-transparent"
+                    id="togglePassword"
+                >
+                    <i
+                        class="ri-eye-line"
+                        id="eyeIcon"
+                    ></i>
                 </span>
+
             </div>
+
         </div>
 
         <div class="d-grid">
-            <button type="submit" name="login" class="btn btn-primary btn-login text-white">
+
+            <button
+                type="submit"
+                name="login"
+                class="btn btn-primary btn-login text-white"
+            >
                 Login as Client
             </button>
+
         </div>
+
     </form>
 
-    <!-- 🔁 SWITCH TO REGISTER -->
     <div class="switch-link">
-        Don’t have an account? <a href="register.php">Create one</a>
+
+        Don't have an account?
+
+        <a href="register.php">
+            Create one
+        </a>
+
     </div>
+
 </div>
 
 <script>
-const togglePassword = document.querySelector('#togglePassword');
-const password = document.querySelector('#passwordInput');
-const eyeIcon = document.querySelector('#eyeIcon');
+
+const togglePassword =
+    document.querySelector('#togglePassword');
+
+const password =
+    document.querySelector('#passwordInput');
+
+const eyeIcon =
+    document.querySelector('#eyeIcon');
 
 togglePassword.addEventListener('click', function () {
-    const type = password.getAttribute('type') === 'password' ? 'text' : 'password';
+
+    const type =
+        password.getAttribute('type') === 'password'
+            ? 'text'
+            : 'password';
+
     password.setAttribute('type', type);
 
     eyeIcon.classList.toggle('ri-eye-line');
     eyeIcon.classList.toggle('ri-eye-off-line');
+
 });
+
 </script>
 
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script
+    src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"
+></script>
 
 </body>
+
 </html>
