@@ -483,9 +483,15 @@ try {
             ], 409);
         }
 
+        /*
+         * IMPORTANT:
+         * phodio_slot_is_taken() expects:
+         *   date, period, optional booking ID
+         *
+         * It does NOT expect $conn as the first argument.
+         */
         if (
             phodio_slot_is_taken(
-                $conn,
                 $date,
                 $period,
                 (int) $bookingId
@@ -567,9 +573,12 @@ try {
         |--------------------------------------------------------------------------
         */
 
+        /*
+         * IMPORTANT:
+         * phodio_slot_is_taken() expects date and period only.
+         */
         if (
             phodio_slot_is_taken(
-                $conn,
                 $date,
                 $period
             )
@@ -680,8 +689,8 @@ try {
     /*
      * TEMPORARY DEBUGGING RESPONSE.
      *
-     * HTTP 200 is intentional here so the existing JavaScript
-     * can display the actual error message.
+     * HTTP 200 is intentional so the existing JavaScript
+     * can display the actual error.
      */
     phodio_json_response([
         'ok' => false,
