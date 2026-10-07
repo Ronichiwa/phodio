@@ -15,8 +15,40 @@
       "dest": "/api/health.php"
     },
     {
-      "src": "/(.*\\.php)",
-      "dest": "/api/$1"
+      "src": "/client_login.php",
+      "dest": "/api/client_login.php"
+    },
+    {
+      "src": "/client_dashboard.php",
+      "dest": "/api/client_dashboard.php"
+    },
+    {
+      "src": "/register.php",
+      "dest": "/api/register.php"
+    },
+    {
+      "src": "/logout.php",
+      "dest": "/api/logout.php"
+    },
+    {
+      "src": "/client_booking.php",
+      "dest": "/api/client_booking.php"
+    },
+    {
+      "src": "/get_client_booking_details.php",
+      "dest": "/api/get_client_booking_details.php"
+    },
+    {
+      "src": "/load_client_events.php",
+      "dest": "/api/load_client_events.php"
+    },
+    {
+      "src": "/process_client_booking.php",
+      "dest": "/api/process_client_booking.php"
+    },
+    {
+      "src": "/recommend_packages.php",
+      "dest": "/api/recommend_packages.php"
     }
   ]
 }
