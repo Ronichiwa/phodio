@@ -1,10 +1,5 @@
 <?php
 
-ini_set('display_errors', '1');
-ini_set('display_startup_errors', '1');
-error_reporting(E_ALL);
-
-require_once __DIR__ . '/config/database.php';
 require_once __DIR__ . '/config/database.php';
 
 if (session_status() === PHP_SESSION_NONE) {
@@ -12,19 +7,24 @@ if (session_status() === PHP_SESSION_NONE) {
 }
 
 if (isset($_POST['register'])) {
+
     $firstname = trim($_POST['firstname'] ?? '');
     $lastname  = trim($_POST['lastname'] ?? '');
     $username  = trim($_POST['username'] ?? '');
     $phone     = trim($_POST['phone'] ?? '');
     $password  = trim($_POST['password'] ?? '');
 
-    // Handle photo upload
+    $error = '';
+    $success = '';
+
+    // Handle profile photo upload
     $profile_image = 'default.png';
 
     if (
         isset($_FILES['profile']) &&
         $_FILES['profile']['error'] === UPLOAD_ERR_OK
     ) {
+
         $ext = strtolower(
             pathinfo($_FILES['profile']['name'], PATHINFO_EXTENSION)
         );
@@ -32,11 +32,12 @@ if (isset($_POST['register'])) {
         $allowed = ['jpg', 'jpeg', 'png', 'gif'];
 
         if (in_array($ext, $allowed, true)) {
+
             $newName = uniqid('profile_', true) . '.' . $ext;
 
             /*
-             * Vercel's filesystem is ephemeral.
-             * Keep the existing upload behavior for now.
+             * Vercel's filesystem is temporary.
+             * We keep this behavior for now.
              */
             $uploadDir = __DIR__ . '/uploads/profile/';
 
@@ -53,11 +54,15 @@ if (isset($_POST['register'])) {
             ) {
                 $profile_image = $newName;
             }
+
         } else {
+
             $error = "Profile image must be JPG, JPEG, PNG, or GIF";
+
         }
     }
 
+    // Validate registration information
     if (
         empty($firstname) ||
         empty($lastname) ||
@@ -65,37 +70,45 @@ if (isset($_POST['register'])) {
         empty($phone) ||
         empty($password)
     ) {
+
         $error = "Please fill all the fields";
 
     } elseif (
         !filter_var($username, FILTER_VALIDATE_EMAIL) ||
         !str_ends_with(strtolower($username), '@gmail.com')
     ) {
+
         $error = "Please use a valid Gmail address";
 
     } elseif (!preg_match('/^09\d{9}$/', $phone)) {
+
         $error = "Phone must start with 09 and be 11 digits";
 
-    } else {
+    } elseif ($error === '') {
+
         try {
-            /*
-             * Check if username or phone already exists.
-             *
-             * This uses PostgreSQL/PDO through our Phodio database
-             * compatibility layer.
-             */
+
+            // Check whether username or phone already exists
             $check = $conn->prepare(
                 "SELECT id FROM users WHERE username = ? OR phone = ?"
             );
 
-            $check->bind_param("ss", $username, $phone);
+            $check->bind_param(
+                "ss",
+                $username,
+                $phone
+            );
+
             $check->execute();
 
             $existingUser = $check->get_result();
 
             if ($existingUser->num_rows > 0) {
+
                 $error = "User already exists";
+
             } else {
+
                 $hashedPassword = password_hash(
                     $password,
                     PASSWORD_DEFAULT
@@ -118,24 +131,38 @@ if (isset($_POST['register'])) {
                 );
 
                 if ($stmt->execute()) {
+
                     $success = "Successfully Registered!";
+
                 } else {
+
                     $error = "Something went wrong";
+
                 }
             }
+
         } catch (Throwable $e) {
-              $error = "Database error: " . $e->getMessage();
-        }
+
+            $error = "Something went wrong while creating your account.";
+
         }
     }
 }
+
 ?>
 
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
+
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+>
+
 <title>Register | SOULPRINT</title>
 
 <link
@@ -144,6 +171,7 @@ if (isset($_POST['register'])) {
 >
 
 <style>
+
 body{
     background:#0f0f0f;
     color:white;
@@ -198,7 +226,9 @@ body{
     text-align:center;
     margin-top:10px;
 }
+
 </style>
+
 </head>
 
 <body>
@@ -209,22 +239,32 @@ body{
         Create Client Account
     </h4>
 
-    <?php if (isset($error)): ?>
+    <?php if ($error !== ''): ?>
+
         <div class="error-msg">
             <?= htmlspecialchars($error) ?>
         </div>
+
     <?php endif; ?>
 
-    <?php if (isset($success)): ?>
+    <?php if ($success !== ''): ?>
+
         <div class="success-msg">
             <?= htmlspecialchars($success) ?>
         </div>
+
     <?php endif; ?>
 
-    <form method="POST" enctype="multipart/form-data">
+    <form
+        method="POST"
+        enctype="multipart/form-data"
+    >
 
         <div class="mb-2">
-            <label for="firstname">First Name</label>
+
+            <label for="firstname">
+                First Name
+            </label>
 
             <input
                 type="text"
@@ -234,10 +274,14 @@ body{
                 placeholder="Enter your first name"
                 required
             >
+
         </div>
 
         <div class="mb-2">
-            <label for="lastname">Last Name</label>
+
+            <label for="lastname">
+                Last Name
+            </label>
 
             <input
                 type="text"
@@ -247,10 +291,14 @@ body{
                 placeholder="Enter your last name"
                 required
             >
+
         </div>
 
         <div class="mb-2">
-            <label for="username">Gmail</label>
+
+            <label for="username">
+                Gmail
+            </label>
 
             <input
                 type="email"
@@ -260,10 +308,14 @@ body{
                 placeholder="Enter your Gmail"
                 required
             >
+
         </div>
 
         <div class="mb-2">
-            <label for="phone">Phone</label>
+
+            <label for="phone">
+                Phone
+            </label>
 
             <input
                 type="text"
@@ -274,10 +326,14 @@ body{
                 placeholder="09XXXXXXXXX"
                 required
             >
+
         </div>
 
         <div class="mb-2">
-            <label for="password">Password</label>
+
+            <label for="password">
+                Password
+            </label>
 
             <input
                 type="password"
@@ -287,10 +343,14 @@ body{
                 placeholder="Enter a password"
                 required
             >
+
         </div>
 
         <div class="mb-3">
-            <label for="profile">Profile Photo</label>
+
+            <label for="profile">
+                Profile Photo
+            </label>
 
             <input
                 type="file"
@@ -299,6 +359,7 @@ body{
                 class="form-control"
                 accept="image/*"
             >
+
         </div>
 
         <button
@@ -312,15 +373,24 @@ body{
     </form>
 
     <div class="switch-link">
+
         Already have an account?
-        <a href="client_login.php">Login</a>
+
+        <a href="client_login.php">
+            Login
+        </a>
+
     </div>
 
 </div>
 
 <script>
-const password = document.querySelector('#passwordInput');
+
+const password =
+    document.querySelector('#passwordInput');
+
 </script>
 
 </body>
+
 </html>
