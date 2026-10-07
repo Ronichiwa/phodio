@@ -204,16 +204,17 @@ if ($action === 'cancel') {
 
     } catch (Throwable $error) {
 
-        if ($pdo->inTransaction()) {
-            $pdo->rollBack();
-        }
-
-        phodio_json_response([
-            'ok' => false,
-            'message' =>
-                'We could not cancel this booking right now. Please try again.'
-        ], 500);
+    if ($pdo->inTransaction()) {
+        $pdo->rollBack();
     }
+
+    phodio_json_response([
+        'ok' => false,
+        'message' => 'BOOKING ERROR: ' . $error->getMessage(),
+        'file' => basename($error->getFile()),
+        'line' => $error->getLine()
+    ], 500);
+}
 }
 
 /*
