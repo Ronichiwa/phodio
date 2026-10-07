@@ -6,122 +6,117 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-if (isset($_POST['register'])) {
+$error = '';
+$success = '';
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['register'])) {
 
     $firstname = trim($_POST['firstname'] ?? '');
     $lastname  = trim($_POST['lastname'] ?? '');
     $username  = trim($_POST['username'] ?? '');
     $phone     = trim($_POST['phone'] ?? '');
-    $password  = trim($_POST['password'] ?? '');
+    $password  = $_POST['password'] ?? '';
 
-    $error = '';
-    $success = '';
-
-    // Handle profile photo upload
-    $profile_image = 'default.png';
+    // -----------------------------------------
+    // VALIDATION
+    // -----------------------------------------
 
     if (
-        isset($_FILES['profile']) &&
-        $_FILES['profile']['error'] === UPLOAD_ERR_OK
+        $firstname === '' ||
+        $lastname === '' ||
+        $username === '' ||
+        $phone === '' ||
+        $password === ''
     ) {
-
-        $ext = strtolower(
-            pathinfo($_FILES['profile']['name'], PATHINFO_EXTENSION)
-        );
-
-        $allowed = ['jpg', 'jpeg', 'png', 'gif'];
-
-        if (in_array($ext, $allowed, true)) {
-
-            $newName = uniqid('profile_', true) . '.' . $ext;
-
-            /*
-             * Vercel's filesystem is temporary.
-             * We keep this behavior for now.
-             */
-            $uploadDir = __DIR__ . '/uploads/profile/';
-
-            if (!is_dir($uploadDir)) {
-                @mkdir($uploadDir, 0755, true);
-            }
-
-            if (
-                is_dir($uploadDir) &&
-                move_uploaded_file(
-                    $_FILES['profile']['tmp_name'],
-                    $uploadDir . $newName
-                )
-            ) {
-                $profile_image = $newName;
-            }
-
-        } else {
-
-            $error = "Profile image must be JPG, JPEG, PNG, or GIF";
-
-        }
+        $error = 'Please fill all the fields.';
     }
 
-    // Validate registration information
-    if (
-        empty($firstname) ||
-        empty($lastname) ||
-        empty($username) ||
-        empty($phone) ||
-        empty($password)
-    ) {
-
-        $error = "Please fill all the fields";
-
-    } elseif (
+    // Gmail validation
+    elseif (
         !filter_var($username, FILTER_VALIDATE_EMAIL) ||
         !str_ends_with(strtolower($username), '@gmail.com')
     ) {
+        $error = 'Please use a valid Gmail address.';
+    }
 
-        $error = "Please use a valid Gmail address";
+    // Philippine phone validation
+    elseif (!preg_match('/^09\d{9}$/', $phone)) {
+        $error = 'Phone must start with 09 and be 11 digits.';
+    }
 
-    } elseif (!preg_match('/^09\d{9}$/', $phone)) {
-
-        $error = "Phone must start with 09 and be 11 digits";
-
-    } elseif ($error === '') {
+    else {
 
         try {
 
-            // Check whether username or phone already exists
+            // -----------------------------------------
+            // CHECK EXISTING USER
+            // -----------------------------------------
+
             $check = $conn->prepare(
-                "SELECT id FROM users WHERE username = ? OR phone = ?"
+                'SELECT id
+                 FROM users
+                 WHERE username = ? OR phone = ?
+                 LIMIT 1'
             );
 
             $check->bind_param(
-                "ss",
+                'ss',
                 $username,
                 $phone
             );
 
             $check->execute();
 
-            $existingUser = $check->get_result();
+            $result = $check->get_result();
 
-            if ($existingUser->num_rows > 0) {
+            if ($result->num_rows > 0) {
 
-                $error = "User already exists";
+                $error = 'User already exists.';
 
             } else {
+
+                // -----------------------------------------
+                // PASSWORD
+                // -----------------------------------------
 
                 $hashedPassword = password_hash(
                     $password,
                     PASSWORD_DEFAULT
                 );
 
+                // -----------------------------------------
+                // PROFILE IMAGE
+                // -----------------------------------------
+
+                $profile_image = 'default.png';
+
+                /*
+                 * Vercel's filesystem is temporary.
+                 *
+                 * For now, we keep the default image.
+                 * We will move profile photos to Supabase
+                 * Storage later.
+                 */
+
+                // -----------------------------------------
+                // INSERT USER
+                // -----------------------------------------
+
                 $stmt = $conn->prepare(
-                    "INSERT INTO users
-                    (firstname, lastname, username, phone, password, profile_image)
-                    VALUES (?, ?, ?, ?, ?, ?)"
+                    'INSERT INTO users
+                    (
+                        firstname,
+                        lastname,
+                        username,
+                        phone,
+                        password,
+                        profile_image
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)'
                 );
 
                 $stmt->bind_param(
-                    "ssssss",
+                    'ssssss',
                     $firstname,
                     $lastname,
                     $username,
@@ -132,19 +127,23 @@ if (isset($_POST['register'])) {
 
                 if ($stmt->execute()) {
 
-                    $success = "Successfully Registered!";
+                    $success = 'Successfully Registered!';
 
                 } else {
 
-                    $error = "Something went wrong";
-
+                    $error = 'Unable to create your account.';
                 }
             }
 
         } catch (Throwable $e) {
 
-            $error = "Something went wrong while creating your account.";
-
+            /*
+             * Show the actual database error instead of
+             * producing a blank HTTP 500 page.
+             *
+             * This is useful while deploying/debugging.
+             */
+            $error = 'Database error: ' . $e->getMessage();
         }
     }
 }
@@ -156,78 +155,97 @@ if (isset($_POST['register'])) {
 
 <head>
 
-<meta charset="UTF-8">
+    <meta charset="UTF-8">
 
-<meta
-    name="viewport"
-    content="width=device-width, initial-scale=1.0"
->
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
 
-<title>Register | SOULPRINT</title>
+    <title>Register | SOULPRINT</title>
 
-<link
-    href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
-    rel="stylesheet"
->
+    <link
+        href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
+        rel="stylesheet"
+    >
 
-<style>
+    <style>
 
-body{
-    background:#0f0f0f;
-    color:white;
-    font-family:Arial,sans-serif;
-}
+        body {
+            background: #0f0f0f;
+            color: white;
+            font-family: Arial, sans-serif;
+        }
 
-.register-card{
-    background:#1a1a1a;
-    padding:30px;
-    border-radius:15px;
-    max-width:450px;
-    margin:50px auto;
-    border:1px solid #333;
-}
+        .register-card {
+            background: #1a1a1a;
+            padding: 30px;
+            border-radius: 15px;
+            max-width: 450px;
+            margin: 50px auto;
+            border: 1px solid #333;
+        }
 
-.form-control{
-    background:#222;
-    color:#fff;
-    border:1px solid #444;
-}
+        .form-control {
+            background: #222;
+            color: #fff;
+            border: 1px solid #444;
+        }
 
-.form-control:focus{
-    border-color:#3b82f6;
-    box-shadow:none;
-}
+        .form-control:focus {
+            background: #222;
+            color: #fff;
+            border-color: #3b82f6;
+            box-shadow: none;
+        }
 
-.btn-register{
-    background:#ef4444;
-    border:none;
-    width:100%;
-    font-weight:bold;
-    margin-top:10px;
-}
+        .form-control::placeholder {
+            color: #888;
+        }
 
-.success-msg{
-    background:rgba(34,197,94,0.1);
-    color:#22c55e;
-    padding:10px;
-    border-radius:8px;
-    margin-bottom:15px;
-}
+        .btn-register {
+            background: #ef4444;
+            border: none;
+            width: 100%;
+            font-weight: bold;
+            margin-top: 10px;
+        }
 
-.error-msg{
-    background:rgba(239,68,68,0.1);
-    color:#ef4444;
-    padding:10px;
-    border-radius:8px;
-    margin-bottom:15px;
-}
+        .btn-register:hover {
+            background: #dc2626;
+        }
 
-.switch-link{
-    text-align:center;
-    margin-top:10px;
-}
+        .success-msg {
+            background: rgba(34, 197, 94, 0.1);
+            color: #22c55e;
+            padding: 10px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+        }
 
-</style>
+        .error-msg {
+            background: rgba(239, 68, 68, 0.1);
+            color: #ef4444;
+            padding: 10px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+        }
+
+        .switch-link {
+            text-align: center;
+            margin-top: 10px;
+        }
+
+        .switch-link a {
+            color: #3b82f6;
+            text-decoration: none;
+        }
+
+        .switch-link a:hover {
+            text-decoration: underline;
+        }
+
+    </style>
 
 </head>
 
@@ -260,6 +278,7 @@ body{
         enctype="multipart/form-data"
     >
 
+        <!-- FIRST NAME -->
         <div class="mb-2">
 
             <label for="firstname">
@@ -272,11 +291,13 @@ body{
                 name="firstname"
                 class="form-control"
                 placeholder="Enter your first name"
+                value="<?= htmlspecialchars($_POST['firstname'] ?? '') ?>"
                 required
             >
 
         </div>
 
+        <!-- LAST NAME -->
         <div class="mb-2">
 
             <label for="lastname">
@@ -289,11 +310,13 @@ body{
                 name="lastname"
                 class="form-control"
                 placeholder="Enter your last name"
+                value="<?= htmlspecialchars($_POST['lastname'] ?? '') ?>"
                 required
             >
 
         </div>
 
+        <!-- GMAIL -->
         <div class="mb-2">
 
             <label for="username">
@@ -306,11 +329,13 @@ body{
                 name="username"
                 class="form-control"
                 placeholder="Enter your Gmail"
+                value="<?= htmlspecialchars($_POST['username'] ?? '') ?>"
                 required
             >
 
         </div>
 
+        <!-- PHONE -->
         <div class="mb-2">
 
             <label for="phone">
@@ -324,11 +349,13 @@ body{
                 class="form-control"
                 maxlength="11"
                 placeholder="09XXXXXXXXX"
+                value="<?= htmlspecialchars($_POST['phone'] ?? '') ?>"
                 required
             >
 
         </div>
 
+        <!-- PASSWORD -->
         <div class="mb-2">
 
             <label for="password">
@@ -346,6 +373,7 @@ body{
 
         </div>
 
+        <!-- PROFILE PHOTO -->
         <div class="mb-3">
 
             <label for="profile">
@@ -360,8 +388,13 @@ body{
                 accept="image/*"
             >
 
+            <small class="text-secondary">
+                Profile photo upload will be stored using Supabase Storage later.
+            </small>
+
         </div>
 
+        <!-- REGISTER -->
         <button
             type="submit"
             name="register"
@@ -383,13 +416,6 @@ body{
     </div>
 
 </div>
-
-<script>
-
-const password =
-    document.querySelector('#passwordInput');
-
-</script>
 
 </body>
 
