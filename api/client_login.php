@@ -6,29 +6,27 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-$error = '';
+$message = '';
+$success = false;
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $username = trim($_POST['username'] ?? '');
     $password = $_POST['password'] ?? '';
 
+    $message .= '<div>1. POST request received</div>';
+
     if ($username === '' || $password === '') {
-
-        $error = 'Please enter your Gmail and password.';
-
+        $message .= '<div style="color:#ff6b6b;">2. Username or password is empty</div>';
     } else {
-
         try {
 
             $pdo = $conn->pdo();
 
+            $message .= '<div>2. Database connected</div>';
+
             $stmt = $pdo->prepare(
-                'SELECT
-                    id,
-                    firstname,
-                    lastname,
-                    password
+                'SELECT id, firstname, lastname, password
                  FROM users
                  WHERE username = :username
                  LIMIT 1'
@@ -40,47 +38,87 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
 
             $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
+            $message .= '<div>3. Database query completed</div>';
+
             if (!$user) {
 
-                $error = 'User not found.';
+                $message .= '<div style="color:#ff6b6b;">4. USER NOT FOUND</div>';
 
-            } elseif (
-                !password_verify(
-                    $password,
-                    $user['password']
-                )
-            ) {
+            } elseif (!password_verify($password, $user['password'])) {
 
-                $error = 'Invalid password.';
+                $message .= '<div style="color:#ff6b6b;">4. PASSWORD DOES NOT MATCH</div>';
 
             } else {
 
-                session_regenerate_id(true);
+                $message .= '<div style="color:#7CFC98;">4. USER AND PASSWORD ARE CORRECT</div>';
 
-                $_SESSION['client_id'] = $user['id'];
+                $_SESSION['client_id'] = (int) $user['id'];
                 $_SESSION['client'] = $username;
                 $_SESSION['client_name'] =
                     $user['firstname'] . ' ' . $user['lastname'];
 
+                /*
+                 * Important on Vercel/serverless:
+                 * explicitly save the session before redirecting.
+                 */
                 session_write_close();
 
-                header('Location: /client_dashboard.php');
-                exit;
+                $success = true;
+
+                $message .= '<div style="color:#7CFC98;">5. SESSION SAVED</div>';
+
+                $message .= '
+                    <div style="color:#7CFC98;font-size:20px;margin-top:15px;">
+                        LOGIN SUCCESSFUL
+                    </div>
+                ';
+
+                $message .= '
+                    <div style="margin-top:10px;">
+                        User ID: ' .
+                        htmlspecialchars(
+                            (string) $user['id'],
+                            ENT_QUOTES,
+                            'UTF-8'
+                        ) .
+                    '</div>
+                ';
+
+                $message .= '
+                    <div>
+                        Name: ' .
+                        htmlspecialchars(
+                            $user['firstname'] . ' ' . $user['lastname'],
+                            ENT_QUOTES,
+                            'UTF-8'
+                        ) .
+                    '</div>
+                ';
+
+                /*
+                 * Do NOT redirect yet.
+                 * We first need to confirm that Vercel receives
+                 * and saves the session correctly.
+                 */
             }
-
-        } catch (PDOException $e) {
-
-            $error = 'Database error: ' . $e->getMessage();
 
         } catch (Throwable $e) {
 
-            $error = 'Application error: ' . $e->getMessage();
+            $message .= '
+                <div style="color:#ff6b6b;margin-top:10px;">
+                    ERROR: ' .
+                    htmlspecialchars(
+                        $e->getMessage(),
+                        ENT_QUOTES,
+                        'UTF-8'
+                    ) .
+                '</div>
+            ';
         }
     }
 }
 
 ?>
-
 <!DOCTYPE html>
 <html lang="en">
 
@@ -93,125 +131,77 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
         content="width=device-width, initial-scale=1.0"
     >
 
-    <title>Client Login | SOULPRINT</title>
-
-    <link
-        href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
-        rel="stylesheet"
-    >
-
-    <link
-        href="https://cdn.jsdelivr.net/npm/remixicon@2.5.0/fonts/remixicon.css"
-        rel="stylesheet"
-    >
+    <title>Client Login Test</title>
 
     <style>
 
-        :root {
-            --bg-dark: #0f0f0f;
-            --card-bg: #1a1a1a;
-            --accent-red: #ef4444;
-            --accent-blue: #3b82f6;
+        * {
+            box-sizing: border-box;
         }
 
         body {
-            background-color: var(--bg-dark);
-            height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-family: 'Inter', sans-serif;
-            margin: 0;
+            background: #111;
             color: white;
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
         }
 
-        .login-card {
-            background: var(--card-bg);
+        .card {
+            width: 100%;
+            max-width: 420px;
+            background: #1d1d1d;
             padding: 30px;
             border-radius: 15px;
+        }
+
+        h2 {
+            margin-top: 0;
+        }
+
+        input {
             width: 100%;
-            max-width: 400px;
-            box-shadow: 0 20px 50px rgba(0,0,0,0.6);
-            border: 1px solid #333;
-            margin: 15px;
-        }
-
-        .brand-logo {
-            font-size: 28px;
-            font-weight: 800;
-            letter-spacing: 3px;
-            margin-bottom: 10px;
-        }
-
-        .form-control {
-            background: #222 !important;
-            border: 1px solid #444 !important;
-            color: #fff !important;
-            padding: 12px 15px;
-            border-radius: 8px;
-        }
-
-        .form-control:focus {
-            border-color: var(--accent-blue) !important;
-            box-shadow: none !important;
-        }
-
-        .btn-login {
-            background: var(--accent-blue);
-            border: none;
             padding: 12px;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            transition: 0.3s;
+            margin: 8px 0 15px;
+            background: #292929;
+            border: 1px solid #444;
+            color: white;
+            border-radius: 6px;
         }
 
-        .btn-login:hover {
-            background: #2563eb;
-            transform: translateY(-2px);
-        }
-
-        .error-msg {
-            background: rgba(239, 68, 68, 0.1);
-            color: var(--accent-red);
-            padding: 10px;
-            border-radius: 8px;
-            font-size: 0.85rem;
-            margin-bottom: 20px;
-            border: 1px solid rgba(239, 68, 68, 0.2);
-        }
-
-        .form-label {
-            color: #ffffff !important;
-            letter-spacing: 1px;
-        }
-
-        .input-group-text {
-            border-color: #444 !important;
-            color: #ffffff !important;
+        button {
+            width: 100%;
+            padding: 12px;
+            background: #3b82f6;
+            border: none;
+            color: white;
+            font-weight: bold;
+            border-radius: 6px;
             cursor: pointer;
         }
 
-        .form-control::placeholder {
-            color: #666 !important;
+        button:hover {
+            background: #2563eb;
         }
 
-        .text-muted {
-            color: #a1a1aa !important;
+        .result {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #222;
+            border-radius: 8px;
+            line-height: 1.8;
         }
 
-        .switch-link {
-            margin-top: 15px;
-            font-size: 0.9rem;
-        }
-
-        .switch-link a {
-            color: var(--accent-blue);
-            text-decoration: none;
-        }
-
-        .switch-link a:hover {
-            text-decoration: underline;
+        .success-box {
+            margin-top: 20px;
+            padding: 15px;
+            background: #12351f;
+            border: 1px solid #246b3a;
+            border-radius: 8px;
         }
 
     </style>
@@ -220,173 +210,56 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
 
 <body>
 
-<div class="login-card text-center">
+<div class="card">
 
-    <div class="brand-logo">
-        SOUL<span style="color:var(--accent-red)">
-            PRINT
-        </span>
-    </div>
+    <h2>Client Login Test</h2>
 
-    <p class="text-muted small mb-4 text-uppercase fw-bold">
-        Client Portal
-    </p>
+    <?php if ($message !== ''): ?>
 
-    <?php if ($error !== ''): ?>
-
-        <div class="error-msg">
-
-            <i class="ri-error-warning-line me-2"></i>
-
-            <?= htmlspecialchars($error) ?>
-
+        <div class="result">
+            <?= $message ?>
         </div>
 
     <?php endif; ?>
 
-    <form
-        method="POST"
-        action="/client_login.php"
-    >
+    <?php if ($success): ?>
 
-        <div class="mb-3 text-start">
-
-            <label class="form-label small fw-bold text-uppercase">
-                Gmail
-            </label>
-
-            <div class="input-group">
-
-                <span class="input-group-text bg-transparent">
-                    <i class="ri-mail-line"></i>
-                </span>
-
-                <input
-                    type="email"
-                    name="username"
-                    class="form-control"
-                    placeholder="Enter Gmail"
-                    value="<?= htmlspecialchars(
-                        $_POST['username'] ?? ''
-                    ) ?>"
-                    required
-                >
-
-            </div>
-
+        <div class="success-box">
+            <strong>Authentication is working.</strong>
+            <br><br>
+            The next step is testing whether the session survives when
+            we open the dashboard.
         </div>
 
+    <?php endif; ?>
 
-        <div class="mb-4 text-start">
+    <form method="POST" action="/client_login.php">
 
-            <label class="form-label small fw-bold text-uppercase">
-                Password
-            </label>
+        <label for="username">Gmail</label>
 
-            <div class="input-group">
+        <input
+            id="username"
+            type="email"
+            name="username"
+            required
+        >
 
-                <span class="input-group-text bg-transparent">
-                    <i class="ri-lock-2-line"></i>
-                </span>
+        <label for="password">Password</label>
 
-                <input
-                    type="password"
-                    name="password"
-                    id="passwordInput"
-                    class="form-control"
-                    placeholder="••••••••"
-                    required
-                >
+        <input
+            id="password"
+            type="password"
+            name="password"
+            required
+        >
 
-                <span
-                    class="input-group-text bg-transparent"
-                    id="togglePassword"
-                >
-
-                    <i
-                        class="ri-eye-line"
-                        id="eyeIcon"
-                    ></i>
-
-                </span>
-
-            </div>
-
-        </div>
-
-
-        <div class="d-grid">
-
-            <button
-                type="submit"
-                name="login"
-                value="1"
-                class="btn btn-primary
-                       btn-login text-white"
-            >
-                Login as Client
-            </button>
-
-        </div>
+        <button type="submit">
+            TEST LOGIN
+        </button>
 
     </form>
 
-
-    <div class="switch-link">
-
-        Don't have an account?
-
-        <a href="/register.php">
-            Create one
-        </a>
-
-    </div>
-
 </div>
-
-
-<script>
-
-const togglePassword =
-    document.querySelector('#togglePassword');
-
-const password =
-    document.querySelector('#passwordInput');
-
-const eyeIcon =
-    document.querySelector('#eyeIcon');
-
-if (togglePassword && password && eyeIcon) {
-
-    togglePassword.addEventListener(
-        'click',
-        function () {
-
-            const type =
-                password.getAttribute('type') === 'password'
-                    ? 'text'
-                    : 'password';
-
-            password.setAttribute('type', type);
-
-            eyeIcon.classList.toggle(
-                'ri-eye-line'
-            );
-
-            eyeIcon.classList.toggle(
-                'ri-eye-off-line'
-            );
-
-        }
-    );
-
-}
-
-</script>
-
-<script
-    src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"
-></script>
 
 </body>
 
