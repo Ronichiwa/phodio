@@ -337,16 +337,8 @@ try {
 } catch (Throwable $error) {
     http_response_code(500);
 
-    header(
-        "Content-Type: application/json; charset=utf-8"
+    die(
+        'Database connection failed. Check the Supabase DATABASE_URL environment variable.'
     );
-
-    echo json_encode([
-        "ok" => false,
-        "database" => "failed",
-        "error" => $error->getMessage()
-    ]);
-
-    exit;
 }
 ?>
