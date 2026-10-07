@@ -15,10 +15,6 @@
       "dest": "/api/health.php"
     },
     {
-      "src": "/session_test.php",
-      "dest": "/api/session_test.php"
-    },
-    {
       "src": "/client_login.php",
       "dest": "/api/client_login.php"
     },
