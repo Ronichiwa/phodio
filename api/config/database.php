@@ -10,6 +10,7 @@ if (session_status() === PHP_SESSION_NONE) {
     // Vercel's PHP runtime has an ephemeral filesystem. /tmp is writable,
     // but sessions are not guaranteed to survive a cold start.
     ini_set('session.save_path', '/tmp/phodio-sessions');
+
     if (!is_dir('/tmp/phodio-sessions')) {
         @mkdir('/tmp/phodio-sessions', 0700, true);
     }
@@ -35,6 +36,7 @@ final class PhodioDbResult
         if ($this->position >= count($this->rows)) {
             return null;
         }
+
         return $this->rows[$this->position++];
     }
 
@@ -52,8 +54,10 @@ final class PhodioDbStatement
     private array $bound = [];
     private string $types = '';
 
-    public function __construct(PhodioDbConnection $connection, string $sql)
-    {
+    public function __construct(
+        PhodioDbConnection $connection,
+        string $sql
+    ) {
         $this->connection = $connection;
         $this->sql = $sql;
     }
@@ -62,26 +66,36 @@ final class PhodioDbStatement
     {
         $this->types = $types;
         $this->bound = [];
+
         foreach ($values as $index => &$value) {
             $this->bound[$index + 1] =& $value;
         }
+
         return true;
     }
 
     public function execute(): bool
     {
         $sql = trim($this->sql);
-        // PostgreSQL does not expose MySQL's insert_id. Add RETURNING id so
-        // the existing application can keep using $conn->insert_id.
-        if (preg_match('/^INSERT\s+INTO\s+/i', $sql) && !preg_match('/\bRETURNING\b/i', $sql)) {
+
+        // PostgreSQL does not expose MySQL's insert_id.
+        // Add RETURNING id so the existing application can keep
+        // using $conn->insert_id.
+        if (
+            preg_match('/^INSERT\s+INTO\s+/i', $sql) &&
+            !preg_match('/\bRETURNING\b/i', $sql)
+        ) {
             $sql .= ' RETURNING id';
         }
 
         try {
             $this->statement = $this->connection->pdo()->prepare($sql);
+
             $params = [];
+
             foreach ($this->bound as $position => &$value) {
                 $type = $this->types[$position - 1] ?? 's';
+
                 if ($value === null) {
                     $params[$position] = null;
                 } elseif ($type === 'i') {
@@ -92,15 +106,22 @@ final class PhodioDbStatement
                     $params[$position] = (string) $value;
                 }
             }
+
             $ok = $this->statement->execute($params);
 
-            if ($ok && preg_match('/^INSERT\s+INTO\s+/i', $sql)) {
+            if (
+                $ok &&
+                preg_match('/^INSERT\s+INTO\s+/i', $sql)
+            ) {
                 $id = $this->statement->fetchColumn();
+
                 if ($id !== false && $id !== null) {
                     $this->connection->setInsertId((int) $id);
                 }
             }
+
             $this->connection->clearError();
+
             return $ok;
         } catch (Throwable $error) {
             $this->connection->captureError($error);
@@ -111,9 +132,13 @@ final class PhodioDbStatement
     public function get_result(): PhodioDbResult
     {
         if (!$this->statement) {
-            throw new RuntimeException('The statement has not been executed.');
+            throw new RuntimeException(
+                'The statement has not been executed.'
+            );
         }
+
         $rows = $this->statement->fetchAll(PDO::FETCH_ASSOC);
+
         return new PhodioDbResult($rows);
     }
 }
@@ -121,6 +146,7 @@ final class PhodioDbStatement
 final class PhodioDbConnection
 {
     private PDO $pdo;
+
     public string $connect_error = '';
     public string $error = '';
     public int $errno = 0;
@@ -129,25 +155,40 @@ final class PhodioDbConnection
     public function __construct()
     {
         try {
-            $url = getenv('DATABASE_URL') ?: ($_ENV['DATABASE_URL'] ?? '');
+            $url = getenv('DATABASE_URL')
+                ?: ($_ENV['DATABASE_URL'] ?? '');
+
             if ($url !== '') {
                 $dsn = $url;
+
                 if (stripos($dsn, 'postgres://') === 0) {
                     $dsn = 'pgsql://' . substr($dsn, 11);
                 }
+
                 $parts = parse_url($dsn);
+
                 if ($parts === false || empty($parts['host'])) {
-                    throw new RuntimeException('DATABASE_URL is invalid.');
+                    throw new RuntimeException(
+                        'DATABASE_URL is invalid.'
+                    );
                 }
+
                 $host = $parts['host'];
                 $port = $parts['port'] ?? 5432;
-                $dbname = isset($parts['path']) ? ltrim($parts['path'], '/') : 'postgres';
+
+                $dbname = isset($parts['path'])
+                    ? ltrim($parts['path'], '/')
+                    : 'postgres';
+
                 $user = $parts['user'] ?? 'postgres';
                 $password = $parts['pass'] ?? '';
+
                 $query = [];
+
                 if (!empty($parts['query'])) {
                     parse_str($parts['query'], $query);
                 }
+
                 $sslmode = $query['sslmode'] ?? 'require';
             } else {
                 $host = getenv('DB_HOST') ?: '127.0.0.1';
@@ -158,16 +199,32 @@ final class PhodioDbConnection
                 $sslmode = getenv('DB_SSLMODE') ?: 'require';
             }
 
-            $dsn = sprintf('pgsql:host=%s;port=%s;dbname=%s;sslmode=%s', $host, $port, $dbname, $sslmode);
-            $this->pdo = new PDO($dsn, $user, $password, [
-                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-                PDO::ATTR_EMULATE_PREPARES => false,
-            ]);
-            $this->pdo->exec("SET TIME ZONE 'Asia/Manila'");
+            $dsn = sprintf(
+                'pgsql:host=%s;port=%s;dbname=%s;sslmode=%s',
+                $host,
+                $port,
+                $dbname,
+                $sslmode
+            );
+
+            $this->pdo = new PDO(
+                $dsn,
+                $user,
+                $password,
+                [
+                    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                    PDO::ATTR_EMULATE_PREPARES => false,
+                ]
+            );
+
+            $this->pdo->exec(
+                "SET TIME ZONE 'Asia/Manila'"
+            );
         } catch (Throwable $error) {
             $this->connect_error = $error->getMessage();
             $this->captureError($error);
+
             throw $error;
         }
     }
@@ -186,20 +243,34 @@ final class PhodioDbConnection
     {
         try {
             $trimmed = trim($sql);
+
             if (preg_match('/^SET\s+time_zone/i', $trimmed)) {
                 $sql = "SET TIME ZONE 'Asia/Manila'";
             }
-            if (preg_match('/^SELECT\b/i', $trimmed) || preg_match('/^WITH\b/i', $trimmed)) {
+
+            if (
+                preg_match('/^SELECT\b/i', $trimmed) ||
+                preg_match('/^WITH\b/i', $trimmed)
+            ) {
                 $statement = $this->pdo->query($sql);
-                $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
+
+                $rows = $statement->fetchAll(
+                    PDO::FETCH_ASSOC
+                );
+
                 $this->clearError();
+
                 return new PhodioDbResult($rows);
             }
+
             $this->pdo->exec($sql);
+
             $this->clearError();
+
             return true;
         } catch (Throwable $error) {
             $this->captureError($error);
+
             throw $error;
         }
     }
@@ -219,6 +290,7 @@ final class PhodioDbConnection
         if ($this->pdo->inTransaction()) {
             return $this->pdo->rollBack();
         }
+
         return true;
     }
 
@@ -242,10 +314,15 @@ final class PhodioDbConnection
     {
         $this->error = $error->getMessage();
         $this->errno = 0;
-        if ($error instanceof PDOException && isset($error->errorInfo[1])) {
+
+        if (
+            $error instanceof PDOException &&
+            isset($error->errorInfo[1])
+        ) {
             $driverCode = (string) $error->errorInfo[1];
-            // MySQL's duplicate-key code is used by the existing application
-            // to select its friendly booking-conflict message.
+
+            // MySQL's duplicate-key code is used by the existing
+            // application to select its friendly booking-conflict message.
             if (($error->errorInfo[0] ?? '') === '23505') {
                 $this->errno = 1062;
             } elseif (ctype_digit($driverCode)) {
@@ -259,6 +336,17 @@ try {
     $conn = new PhodioDbConnection();
 } catch (Throwable $error) {
     http_response_code(500);
-    die('Database connection failed. Check the Supabase DATABASE_URL environment variable.');
+
+    header(
+        "Content-Type: application/json; charset=utf-8"
+    );
+
+    echo json_encode([
+        "ok" => false,
+        "database" => "failed",
+        "error" => $error->getMessage()
+    ]);
+
+    exit;
 }
 ?>
