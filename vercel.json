@@ -7,6 +7,10 @@
   },
   "routes": [
     {
+      "src": "/",
+      "dest": "/api/index.php"
+    },
+    {
       "src": "/health.php",
       "dest": "/api/health.php"
     },
