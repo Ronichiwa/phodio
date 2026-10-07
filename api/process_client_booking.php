@@ -10,14 +10,22 @@ if (session_status() === PHP_SESSION_NONE) {
 $pdo = $conn->pdo();
 
 /*
- * Restore the client session from the database-backed cookie.
- */
+|--------------------------------------------------------------------------
+| RESTORE DATABASE-BACKED SESSION
+|--------------------------------------------------------------------------
+*/
+
 if (empty($_SESSION['client_id'])) {
+
     $sessionId = $_COOKIE['phodio_session'] ?? '';
 
     if ($sessionId !== '') {
+
         $sessionStmt = $pdo->prepare("
-            SELECT client_id, client_username, client_name
+            SELECT
+                client_id,
+                client_username,
+                client_name
             FROM phodio_sessions
             WHERE session_id = :session_id
               AND expires_at > NOW()
@@ -31,24 +39,34 @@ if (empty($_SESSION['client_id'])) {
         $session = $sessionStmt->fetch(PDO::FETCH_ASSOC);
 
         if ($session) {
-            $_SESSION['client_id'] = (int) $session['client_id'];
-            $_SESSION['client_username'] = $session['client_username'] ?? '';
-            $_SESSION['client_name'] = $session['client_name'] ?? '';
+
+            $_SESSION['client_id'] =
+                (int) $session['client_id'];
+
+            $_SESSION['client_username'] =
+                $session['client_username'] ?? '';
+
+            $_SESSION['client_name'] =
+                $session['client_name'] ?? '';
         }
     }
 }
 
 if (empty($_SESSION['client_id'])) {
+
     phodio_json_response([
         'ok' => false,
-        'message' => 'Please sign in before managing bookings.'
+        'message' =>
+            'Please sign in before managing bookings.'
     ], 401);
 }
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+
     phodio_json_response([
         'ok' => false,
-        'message' => 'Use POST to manage a booking.'
+        'message' =>
+            'Use POST to manage a booking.'
     ], 405);
 }
 
@@ -78,11 +96,13 @@ if ($action === 'cancel') {
     ) {
         phodio_json_response([
             'ok' => false,
-            'message' => 'Select a valid booking to cancel.'
+            'message' =>
+                'Select a valid booking to cancel.'
         ], 422);
     }
 
     try {
+
         $pdo->beginTransaction();
 
         $stmt = $pdo->prepare("
@@ -105,11 +125,13 @@ if ($action === 'cancel') {
         $booking = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if (!$booking) {
+
             $pdo->rollBack();
 
             phodio_json_response([
                 'ok' => false,
-                'message' => 'Booking not found.'
+                'message' =>
+                    'Booking not found.'
             ], 404);
         }
 
@@ -120,6 +142,7 @@ if ($action === 'cancel') {
                 true
             )
         ) {
+
             $pdo->rollBack();
 
             phodio_json_response([
@@ -135,9 +158,8 @@ if ($action === 'cancel') {
                 (string) $booking['start_time']
             );
 
-        $scheduledTime = phodio_slot_time(
-            $bookingPeriod
-        );
+        $scheduledTime =
+            phodio_slot_time($bookingPeriod);
 
         if (
             (string) $booking['booking_date'] < date('Y-m-d')
@@ -151,6 +173,7 @@ if ($action === 'cancel') {
                 date('H:i:s') >= $scheduledTime
             )
         ) {
+
             $pdo->rollBack();
 
             phodio_json_response([
@@ -161,6 +184,7 @@ if ($action === 'cancel') {
         }
 
         $status = 'Cancelled';
+
         $note = 'Booking cancelled by client.';
 
         $update = $pdo->prepare("
@@ -181,10 +205,6 @@ if ($action === 'cancel') {
             'client_id' => $clientId
         ]);
 
-        /*
-         * booking_helpers.php currently expects the database connection
-         * object. We pass the PDO-compatible connection as before.
-         */
         phodio_record_booking_update(
             $conn,
             $bookingId,
@@ -204,33 +224,46 @@ if ($action === 'cancel') {
 
     } catch (Throwable $error) {
 
-    if ($pdo->inTransaction()) {
-        $pdo->rollBack();
-    }
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
 
-    phodio_json_response([
-        'ok' => false,
-        'message' => 'BOOKING ERROR: ' . $error->getMessage(),
-        'file' => basename($error->getFile()),
-        'line' => $error->getLine()
-    ], 500);
-}
+        phodio_json_response([
+            'ok' => false,
+            'message' =>
+                'CANCEL ERROR: ' .
+                $error->getMessage(),
+            'file' =>
+                basename($error->getFile()),
+            'line' =>
+                $error->getLine()
+        ]);
+    }
 }
 
 /*
 |--------------------------------------------------------------------------
-| SAVE / CREATE / EDIT BOOKING
+| ONLY SAVE IS SUPPORTED AFTER THIS POINT
 |--------------------------------------------------------------------------
 */
 
 if ($action !== 'save') {
+
     phodio_json_response([
         'ok' => false,
-        'message' => 'Unsupported booking action.'
+        'message' =>
+            'Unsupported booking action.'
     ], 422);
 }
 
+/*
+|--------------------------------------------------------------------------
+| BOOKING INPUT
+|--------------------------------------------------------------------------
+*/
+
 $catalog = phodio_package_catalog();
+
 $serviceTypes = phodio_service_types();
 
 $packageKey = trim(
@@ -266,6 +299,12 @@ $attendees = filter_var(
     FILTER_VALIDATE_INT
 );
 
+/*
+|--------------------------------------------------------------------------
+| VALIDATION
+|--------------------------------------------------------------------------
+*/
+
 if (
     !isset($catalog[$packageKey]) ||
     !isset($serviceTypes[$serviceType]) ||
@@ -273,6 +312,7 @@ if (
     $attendees < 1 ||
     $attendees > 4
 ) {
+
     phodio_json_response([
         'ok' => false,
         'message' =>
@@ -286,6 +326,7 @@ if (
     $attendees < $package['min_people'] ||
     $attendees > $package['max_people']
 ) {
+
     phodio_json_response([
         'ok' => false,
         'message' =>
@@ -300,6 +341,7 @@ if (
     strlen($motif) > 100 ||
     strlen($clientNotes) > 1000
 ) {
+
     phodio_json_response([
         'ok' => false,
         'message' =>
@@ -311,6 +353,7 @@ if (
     !phodio_valid_booking_date($date) ||
     $date < date('Y-m-d')
 ) {
+
     phodio_json_response([
         'ok' => false,
         'message' =>
@@ -321,6 +364,7 @@ if (
 $startTime = phodio_slot_time($period);
 
 if ($startTime === null) {
+
     phodio_json_response([
         'ok' => false,
         'message' =>
@@ -332,6 +376,7 @@ if (
     $date === date('Y-m-d') &&
     date('H:i:s') >= $startTime
 ) {
+
     phodio_json_response([
         'ok' => false,
         'message' =>
@@ -339,17 +384,36 @@ if (
     ], 422);
 }
 
-$packageName = (string) $package['name'];
-$price = (float) $package['price'];
+/*
+|--------------------------------------------------------------------------
+| PACKAGE INFORMATION
+|--------------------------------------------------------------------------
+*/
+
+$packageName =
+    (string) $package['name'];
+
+$price =
+    (float) $package['price'];
 
 $color = '#3b82f6';
 
 if (
-    strpos($package['category'], 'Creative') !== false ||
+    strpos(
+        $package['category'],
+        'Creative'
+    ) !== false
+    ||
     $package['backdrop']
 ) {
+
     $color = '#a855f7';
-} elseif ($package['category'] === 'Student Promo') {
+
+} elseif (
+    $package['category'] ===
+    'Student Promo'
+) {
+
     $color = '#10b981';
 }
 
@@ -358,13 +422,22 @@ $status = 'Pending';
 $statusNote =
     'Booking request submitted; awaiting studio confirmation.';
 
+/*
+|--------------------------------------------------------------------------
+| SAVE BOOKING
+|--------------------------------------------------------------------------
+*/
+
 try {
 
     $pdo->beginTransaction();
 
     /*
-     * EDIT EXISTING BOOKING
-     */
+    |--------------------------------------------------------------------------
+    | EDIT EXISTING PENDING BOOKING
+    |--------------------------------------------------------------------------
+    */
+
     if (
         $bookingId !== false &&
         $bookingId !== null &&
@@ -372,7 +445,8 @@ try {
     ) {
 
         $lookup = $pdo->prepare("
-            SELECT status
+            SELECT
+                status
             FROM bookings
             WHERE id = :booking_id
               AND client_id = :client_id
@@ -384,18 +458,22 @@ try {
             'client_id' => $clientId
         ]);
 
-        $existing = $lookup->fetch(PDO::FETCH_ASSOC);
+        $existing =
+            $lookup->fetch(PDO::FETCH_ASSOC);
 
         if (!$existing) {
+
             $pdo->rollBack();
 
             phodio_json_response([
                 'ok' => false,
-                'message' => 'Booking not found.'
+                'message' =>
+                    'Booking not found.'
             ], 404);
         }
 
         if ($existing['status'] !== 'Pending') {
+
             $pdo->rollBack();
 
             phodio_json_response([
@@ -413,6 +491,7 @@ try {
                 (int) $bookingId
             )
         ) {
+
             $pdo->rollBack();
 
             phodio_json_response([
@@ -474,7 +553,8 @@ try {
             $clientId
         );
 
-        $savedId = (int) $bookingId;
+        $savedId =
+            (int) $bookingId;
 
         $message =
             'Your request has been updated and sent to the studio for confirmation.';
@@ -482,8 +562,11 @@ try {
     } else {
 
         /*
-         * CREATE NEW BOOKING
-         */
+        |--------------------------------------------------------------------------
+        | CREATE NEW BOOKING
+        |--------------------------------------------------------------------------
+        */
+
         if (
             phodio_slot_is_taken(
                 $conn,
@@ -491,6 +574,7 @@ try {
                 $period
             )
         ) {
+
             $pdo->rollBack();
 
             phodio_json_response([
@@ -557,7 +641,8 @@ try {
             'status_note' => $statusNote
         ]);
 
-        $savedId = (int) $insert->fetchColumn();
+        $savedId =
+            (int) $insert->fetchColumn();
 
         phodio_record_booking_update(
             $conn,
@@ -571,6 +656,12 @@ try {
         $message =
             'Your booking request was submitted. The appointment period is held while the studio confirms it.';
     }
+
+    /*
+    |--------------------------------------------------------------------------
+    | COMMIT
+    |--------------------------------------------------------------------------
+    */
 
     $pdo->commit();
 
@@ -586,9 +677,20 @@ try {
         $pdo->rollBack();
     }
 
+    /*
+     * TEMPORARY DEBUGGING RESPONSE.
+     *
+     * HTTP 200 is intentional here so the existing JavaScript
+     * can display the actual error message.
+     */
     phodio_json_response([
         'ok' => false,
         'message' =>
-            'We could not save your request. Please try again.'
-    ], 500);
+            'BOOKING ERROR: ' .
+            $error->getMessage(),
+        'file' =>
+            basename($error->getFile()),
+        'line' =>
+            $error->getLine()
+    ]);
 }
