@@ -7,8 +7,11 @@ if (session_status() === PHP_SESSION_NONE) {
 }
 
 $error = '';
+$debug = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
+
+    $debug = 'LOGIN POST RECEIVED';
 
     $username = trim($_POST['username'] ?? '');
     $password = $_POST['password'] ?? '';
@@ -21,7 +24,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
 
         try {
 
-            // Use PDO directly for Supabase PostgreSQL
+            $debug = 'DATABASE CONNECTION OK';
+
             $pdo = $conn->pdo();
 
             $stmt = $pdo->prepare(
@@ -44,6 +48,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
             if (!$user) {
 
                 $error = 'User not found.';
+                $debug = 'DATABASE QUERY WORKED - USER NOT FOUND';
 
             } elseif (
                 !password_verify(
@@ -53,23 +58,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
             ) {
 
                 $error = 'Invalid password.';
+                $debug = 'USER FOUND - PASSWORD DOES NOT MATCH';
 
             } else {
 
-                // Regenerate the session ID after successful login
-                session_regenerate_id(true);
+                $debug = 'LOGIN SUCCESSFUL - CREATING SESSION';
 
                 $_SESSION['client_id'] = $user['id'];
                 $_SESSION['client'] = $username;
                 $_SESSION['client_name'] =
                     $user['firstname'] . ' ' . $user['lastname'];
 
-                /*
-                 * Vercel route:
-                 * /client_dashboard.php
-                 *
-                 * Do not use a relative redirect here.
-                 */
+                session_write_close();
+
                 header('Location: /client_dashboard.php');
                 exit;
             }
@@ -77,10 +78,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
         } catch (PDOException $e) {
 
             $error = 'Database error: ' . $e->getMessage();
+            $debug = 'PDO ERROR';
 
         } catch (Throwable $e) {
 
             $error = 'Application error: ' . $e->getMessage();
+            $debug = 'PHP ERROR';
         }
     }
 }
@@ -137,7 +140,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
             border-radius: 15px;
             width: 100%;
             max-width: 400px;
-            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+            box-shadow: 0 20px 50px rgba(0,0,0,0.6);
             border: 1px solid #333;
             margin: 15px;
         }
@@ -185,6 +188,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
             font-size: 0.85rem;
             margin-bottom: 20px;
             border: 1px solid rgba(239, 68, 68, 0.2);
+        }
+
+        .debug-msg {
+            background: rgba(59, 130, 246, 0.12);
+            color: #60a5fa;
+            padding: 10px;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            margin-bottom: 20px;
+            border: 1px solid rgba(59, 130, 246, 0.25);
         }
 
         .form-label {
@@ -238,6 +251,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
         Client Portal
     </p>
 
+    <?php if ($debug !== ''): ?>
+
+        <div class="debug-msg">
+
+            <i class="ri-information-line me-2"></i>
+
+            <?= htmlspecialchars($debug) ?>
+
+        </div>
+
+    <?php endif; ?>
+
     <?php if ($error !== ''): ?>
 
         <div class="error-msg">
@@ -250,7 +275,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
 
     <?php endif; ?>
 
-    <form method="POST">
+    <form method="POST" action="">
 
         <div class="mb-3 text-start">
 
@@ -317,6 +342,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
             <button
                 type="submit"
                 name="login"
+                value="1"
                 class="btn btn-primary btn-login text-white"
             >
                 Login as Client
