@@ -31,7 +31,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['register'])) {
         $error = 'Please fill all the fields.';
     }
 
-    // Gmail validation
     elseif (
         !filter_var($username, FILTER_VALIDATE_EMAIL) ||
         !str_ends_with(strtolower($username), '@gmail.com')
@@ -39,7 +38,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['register'])) {
         $error = 'Please use a valid Gmail address.';
     }
 
-    // Philippine phone validation
     elseif (!preg_match('/^09\d{9}$/', $phone)) {
         $error = 'Phone must start with 09 and be 11 digits.';
     }
@@ -48,35 +46,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['register'])) {
 
         try {
 
+            /*
+             * Use PDO directly.
+             *
+             * The database.php compatibility layer still exists
+             * for the rest of the application, but registration
+             * uses PDO directly so PostgreSQL parameters work
+             * correctly.
+             */
+
+            $pdo = $conn->pdo();
+
             // -----------------------------------------
             // CHECK EXISTING USER
             // -----------------------------------------
 
-            $check = $conn->prepare(
+            $check = $pdo->prepare(
                 'SELECT id
                  FROM users
-                 WHERE username = ? OR phone = ?
+                 WHERE username = :username
+                    OR phone = :phone
                  LIMIT 1'
             );
 
-            $check->bind_param(
-                'ss',
-                $username,
-                $phone
-            );
+            $check->execute([
+                ':username' => $username,
+                ':phone'    => $phone
+            ]);
 
-            $check->execute();
+            $existingUser = $check->fetch(PDO::FETCH_ASSOC);
 
-            $result = $check->get_result();
-
-            if ($result->num_rows > 0) {
+            if ($existingUser) {
 
                 $error = 'User already exists.';
 
             } else {
 
                 // -----------------------------------------
-                // PASSWORD
+                // HASH PASSWORD
                 // -----------------------------------------
 
                 $hashedPassword = password_hash(
@@ -88,21 +95,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['register'])) {
                 // PROFILE IMAGE
                 // -----------------------------------------
 
-                $profile_image = 'default.png';
-
                 /*
                  * Vercel's filesystem is temporary.
                  *
-                 * For now, we keep the default image.
-                 * We will move profile photos to Supabase
-                 * Storage later.
+                 * For now, use the default image.
+                 * We can move profile uploads to Supabase
+                 * Storage afterward.
                  */
+
+                $profile_image = 'default.png';
 
                 // -----------------------------------------
                 // INSERT USER
                 // -----------------------------------------
 
-                $stmt = $conn->prepare(
+                $stmt = $pdo->prepare(
                     'INSERT INTO users
                     (
                         firstname,
@@ -112,38 +119,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['register'])) {
                         password,
                         profile_image
                     )
-                    VALUES (?, ?, ?, ?, ?, ?)'
+                    VALUES
+                    (
+                        :firstname,
+                        :lastname,
+                        :username,
+                        :phone,
+                        :password,
+                        :profile_image
+                    )'
                 );
 
-                $stmt->bind_param(
-                    'ssssss',
-                    $firstname,
-                    $lastname,
-                    $username,
-                    $phone,
-                    $hashedPassword,
-                    $profile_image
-                );
+                $stmt->execute([
+                    ':firstname'     => $firstname,
+                    ':lastname'      => $lastname,
+                    ':username'      => $username,
+                    ':phone'         => $phone,
+                    ':password'      => $hashedPassword,
+                    ':profile_image' => $profile_image
+                ]);
 
-                if ($stmt->execute()) {
-
-                    $success = 'Successfully Registered!';
-
-                } else {
-
-                    $error = 'Unable to create your account.';
-                }
+                $success = 'Successfully Registered!';
             }
+
+        } catch (PDOException $e) {
+
+            /*
+             * Keep the actual PostgreSQL error visible while
+             * we are debugging the deployment.
+             */
+            $error = 'Database error: ' . $e->getMessage();
 
         } catch (Throwable $e) {
 
-            /*
-             * Show the actual database error instead of
-             * producing a blank HTTP 500 page.
-             *
-             * This is useful while deploying/debugging.
-             */
-            $error = 'Database error: ' . $e->getMessage();
+            $error = 'Application error: ' . $e->getMessage();
         }
     }
 }
@@ -155,97 +164,97 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['register'])) {
 
 <head>
 
-    <meta charset="UTF-8">
+<meta charset="UTF-8">
 
-    <meta
-        name="viewport"
-        content="width=device-width, initial-scale=1.0"
-    >
+<meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+>
 
-    <title>Register | SOULPRINT</title>
+<title>Register | SOULPRINT</title>
 
-    <link
-        href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
-        rel="stylesheet"
-    >
+<link
+    href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
+    rel="stylesheet"
+>
 
-    <style>
+<style>
 
-        body {
-            background: #0f0f0f;
-            color: white;
-            font-family: Arial, sans-serif;
-        }
+body {
+    background: #0f0f0f;
+    color: white;
+    font-family: Arial, sans-serif;
+}
 
-        .register-card {
-            background: #1a1a1a;
-            padding: 30px;
-            border-radius: 15px;
-            max-width: 450px;
-            margin: 50px auto;
-            border: 1px solid #333;
-        }
+.register-card {
+    background: #1a1a1a;
+    padding: 30px;
+    border-radius: 15px;
+    max-width: 450px;
+    margin: 50px auto;
+    border: 1px solid #333;
+}
 
-        .form-control {
-            background: #222;
-            color: #fff;
-            border: 1px solid #444;
-        }
+.form-control {
+    background: #222;
+    color: #fff;
+    border: 1px solid #444;
+}
 
-        .form-control:focus {
-            background: #222;
-            color: #fff;
-            border-color: #3b82f6;
-            box-shadow: none;
-        }
+.form-control:focus {
+    background: #222;
+    color: #fff;
+    border-color: #3b82f6;
+    box-shadow: none;
+}
 
-        .form-control::placeholder {
-            color: #888;
-        }
+.form-control::placeholder {
+    color: #888;
+}
 
-        .btn-register {
-            background: #ef4444;
-            border: none;
-            width: 100%;
-            font-weight: bold;
-            margin-top: 10px;
-        }
+.btn-register {
+    background: #ef4444;
+    border: none;
+    width: 100%;
+    font-weight: bold;
+    margin-top: 10px;
+}
 
-        .btn-register:hover {
-            background: #dc2626;
-        }
+.btn-register:hover {
+    background: #dc2626;
+}
 
-        .success-msg {
-            background: rgba(34, 197, 94, 0.1);
-            color: #22c55e;
-            padding: 10px;
-            border-radius: 8px;
-            margin-bottom: 15px;
-        }
+.success-msg {
+    background: rgba(34, 197, 94, 0.1);
+    color: #22c55e;
+    padding: 10px;
+    border-radius: 8px;
+    margin-bottom: 15px;
+}
 
-        .error-msg {
-            background: rgba(239, 68, 68, 0.1);
-            color: #ef4444;
-            padding: 10px;
-            border-radius: 8px;
-            margin-bottom: 15px;
-        }
+.error-msg {
+    background: rgba(239, 68, 68, 0.1);
+    color: #ef4444;
+    padding: 10px;
+    border-radius: 8px;
+    margin-bottom: 15px;
+}
 
-        .switch-link {
-            text-align: center;
-            margin-top: 10px;
-        }
+.switch-link {
+    text-align: center;
+    margin-top: 10px;
+}
 
-        .switch-link a {
-            color: #3b82f6;
-            text-decoration: none;
-        }
+.switch-link a {
+    color: #3b82f6;
+    text-decoration: none;
+}
 
-        .switch-link a:hover {
-            text-decoration: underline;
-        }
+.switch-link a:hover {
+    text-decoration: underline;
+}
 
-    </style>
+</style>
 
 </head>
 
@@ -278,7 +287,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['register'])) {
         enctype="multipart/form-data"
     >
 
-        <!-- FIRST NAME -->
         <div class="mb-2">
 
             <label for="firstname">
@@ -297,7 +305,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['register'])) {
 
         </div>
 
-        <!-- LAST NAME -->
         <div class="mb-2">
 
             <label for="lastname">
@@ -316,7 +323,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['register'])) {
 
         </div>
 
-        <!-- GMAIL -->
         <div class="mb-2">
 
             <label for="username">
@@ -335,7 +341,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['register'])) {
 
         </div>
 
-        <!-- PHONE -->
         <div class="mb-2">
 
             <label for="phone">
@@ -355,7 +360,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['register'])) {
 
         </div>
 
-        <!-- PASSWORD -->
         <div class="mb-2">
 
             <label for="password">
@@ -373,7 +377,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['register'])) {
 
         </div>
 
-        <!-- PROFILE PHOTO -->
         <div class="mb-3">
 
             <label for="profile">
@@ -389,12 +392,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['register'])) {
             >
 
             <small class="text-secondary">
-                Profile photo upload will be stored using Supabase Storage later.
+                You can add your profile photo later.
             </small>
 
         </div>
 
-        <!-- REGISTER -->
         <button
             type="submit"
             name="register"
