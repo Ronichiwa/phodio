@@ -124,7 +124,8 @@ if (isset($_POST['register'])) {
                 }
             }
         } catch (Throwable $e) {
-            $error = "Something went wrong while creating your account.";
+              $error = "Database error: " . $e->getMessage();
+        }
         }
     }
 }
